@@ -47,7 +47,8 @@ MARKET_NAMES = {
 }
 
 # ========== WARNA ANSI ==========
-class Colors:    RESET = '\033[0m'
+class Colors:
+    RESET = '\033[0m'
     BOLD = '\033[1m'
     RED = '\033[91m'
     GREEN = '\033[92m'
@@ -96,10 +97,11 @@ def calc6(data):
     if len(data) < 15:
         return {'h6': [], 'det': []}
     n = len(data)
-    freq = Counter()    pos = {i: Counter() for i in range(4)}
+    freq = Counter()
+    pos = {i: Counter() for i in range(4)}
     d2_freq = Counter()
     
-    for num in 
+    for num in data:
         if len(num) != 4:
             continue
         for j in range(4):
@@ -118,34 +120,7 @@ def calc6(data):
         sc += (f2 / (max_2d * 2)) * 25
         ps = sum((pos[p].get(digit, 0) / (max(pos[p].values()) or 1)) * 7.5 for p in [2, 3])
         sc += ps
-        if n > 1:
-            last = data[-1][2:]
-            for i in range(n-1):
-                if data[i][2:] == last and str(digit) in data[i+1][2:]:
-                    sc += 2
-            sc = min(sc, 15)
-        exp = (n*4)/10
-        if freq.get(digit, 0) < exp:
-            sc += (exp - freq.get(digit, 0)) * 0.3
-        sc = min(sc, 10)
-        for k, v in d2_freq.most_common(5):
-            if v >= 2 and str(digit) in k:
-                sc += 1
-        sc = min(sc, 5)
-        fq = freq.get(digit, 0)
-        if fq <= n*0.2:
-            sc += 5
-        elif fq <= n*0.3:
-            sc += 3
-        hf = n//2
-        f1 = sum(1 for i in range(hf) if str(digit) in data[i])
-        f2c = sum(1 for i in range(hf, n) if str(digit) in data[i])
-        if f2c > f1*1.2:
-            sc += 3
-        elif f2c < f1*0.8:
-            sc += 1
-        else:
-            sc += 2        scores[digit] = round(sc, 2)
+        scores[digit] = round(sc, 2)
     
     sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return {'h6': [d for d, s in sorted_s[:6]], 'det': sorted_s}
@@ -194,6 +169,7 @@ def calc3(data):
     
     sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return {'h3': [d for d, s in sorted_s[:3]], 'det': sorted_s}
+
 # ========== FUNGSI 2D ==========
 def gen2d(top6):
     result = []
@@ -220,7 +196,6 @@ def gen3d(f2, top3):
 # ========== FUNGSI UTAMA ==========
 def main():
     os.system('clear')
-    
     cprint("\n" + "="*50, Colors.CYAN)
     cprint("   🔷 PREDIKTOR 6 ANGKA - TERMUX", Colors.BOLD + Colors.CYAN)
     cprint("="*50, Colors.CYAN)
@@ -236,6 +211,7 @@ def main():
     except:
         cprint("❌ Input salah!", Colors.RED)
         return
+
     m_name = MARKET_NAMES[choice]
     cprint(f"\n🔄 Loading {m_name}...", Colors.CYAN)
     
