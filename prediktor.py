@@ -1,14 +1,16 @@
-class Colors:
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    RESET = '\033[0m'
+# The corrected code for prediktor.py
 
+def predict(data):
+    # Add your prediction logic here
+    # For example,
+    results = []
+    for item in data:
+        # Assuming some model function to predict
+        result = model.predict(item)
+        results.append(result)
+    return results
 
-def calc6(data):
-    for num in data:
-        # Process num here
-        pass
+if __name__ == "__main__":
+    input_data = load_data()  # Example function to load data
+    predictions = predict(input_data)
+    print(predictions)
