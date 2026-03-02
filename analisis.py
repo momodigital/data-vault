@@ -64,12 +64,12 @@ class Colors:
     CYAN = '\033[96m'
     WHITE = '\033[97m'
 
-def cprint(text, color=Colors.RESET):
-    """Print dengan warna"""
+def cprint(text, color=Colors.RESET, **kwargs):
+    """Print dengan warna - mendukung parameter end, sep, dll"""
     try:
-        print(f"{color}{text}{Colors.RESET}")
+        print(f"{color}{text}{Colors.RESET}", **kwargs)
     except Exception:
-        print(text)
+        print(text, **kwargs)
 
 # ========== FUNGSI FETCH DATA ==========
 def fetch_github_csv(market_key):
@@ -266,7 +266,7 @@ def display_patterns(patterns, market_name, market_num):
     if patterns['two_d_top']:
         cprint(f"\n🔢 TOP 5 2D:", Colors.GREEN + Colors.BOLD)
         for i, (num, count) in enumerate(patterns['two_d_top'][:5], 1):
-            bar_len = int(count / patterns['two_d_top'][0][1] * 20)
+            bar_len = int(count / patterns['two_d_top'][0][1] * 20) if patterns['two_d_top'] else 0
             bar = "█" * bar_len
             cprint(f"   {i}. {num}: {count}x [{bar}]", Colors.WHITE)
     
@@ -274,15 +274,16 @@ def display_patterns(patterns, market_name, market_num):
     if patterns['three_d_top']:
         cprint(f"\n🔢 TOP 5 3D:", Colors.CYAN + Colors.BOLD)
         for i, (num, count) in enumerate(patterns['three_d_top'][:5], 1):
-            bar_len = int(count / patterns['three_d_top'][0][1] * 20)
+            bar_len = int(count / patterns['three_d_top'][0][1] * 20) if patterns['three_d_top'] else 0
             bar = "█" * bar_len
             cprint(f"   {i}. {num}: {count}x [{bar}]", Colors.WHITE)
     
     # Last digit frequency
     if patterns['last_digit_freq']:
         cprint(f"\n🎯 FREKUENSI DIGIT TERAKHIR:", Colors.MAGENTA)
+        max_count = patterns['last_digit_freq'][0][1] if patterns['last_digit_freq'] else 1
         for digit, count in patterns['last_digit_freq']:
-            bar_len = int(count / patterns['last_digit_freq'][0][1] * 20)
+            bar_len = int(count / max_count * 20)
             bar = "█" * bar_len
             cprint(f"   Digit {digit}: {count}x [{bar}]", Colors.WHITE)
     
@@ -451,7 +452,8 @@ def main():
     cprint("🔍 ANALISIS POLA - MULTI-PASARAN", Colors.MAGENTA + Colors.BOLD)
     print("="*50)
     
-    cprint("\n🔧 KONFIGURASI: ", end="")
+    # Perbaikan di sini - menggunakan print biasa untuk yang pakai end=
+    print(f"\n{Colors.YELLOW}🔧 KONFIGURASI: ", end="")
     if RUN_ALL_AUTO_MODE:
         cprint(f"AUTO RUN ALL MARKETS", Colors.GREEN + Colors.BOLD)
         cprint(f"  Akan menganalisis {len(MARKET_NAMES)} pasaran secara berurutan", Colors.CYAN)
