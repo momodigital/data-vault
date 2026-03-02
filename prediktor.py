@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 🔷 PREDIKTOR 6 ANGKA - Termux Edition
-GitHub Integration • Export TXT • Colored Output
+GitHub Integration • Kepala/Ekor • Export TXT • Colored Output
 """
 
 import requests
@@ -68,7 +68,7 @@ def fetch_github_csv(market_key):
         return None
     url = f"https://raw.githubusercontent.com/{GITHUB_CONFIG['username']}/{GITHUB_CONFIG['repo']}/{GITHUB_CONFIG['branch']}/{GITHUB_CONFIG['path']}/{file_info[1]}"
     try:
-        cprint("📡 Mengambil data dari GitHub...", Colors.CYAN)
+        cprint("📡 Mengambil data dari Database...", Colors.CYAN)
         r = requests.get(url, timeout=30)
         r.raise_for_status()
         return r.text
@@ -170,6 +170,40 @@ def calc3(data):
     sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return {'h3': [d for d, s in sorted_s[:3]], 'det': sorted_s}
 
+# ========== FUNGSI KEPALA ==========
+def calc_kepala(data):
+    if len(data) < 15:
+        return []
+    n = len(data)
+    pos_freq = Counter()
+    for num in data:
+        if len(num) >= 3:
+            d = int(num[2])
+            pos_freq[d] += 1
+    scores = {}
+    for digit in range(10):
+        sc = (pos_freq.get(digit, 0) / (max(pos_freq.values()) or 1)) * 40
+        scores[digit] = round(sc, 2)
+    sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [d for d, s in sorted_s[:7]]
+
+# ========== FUNGSI EKOR ==========
+def calc_ekor(data):
+    if len(data) < 15:
+        return []
+    n = len(data)
+    pos_freq = Counter()
+    for num in data:
+        if len(num) >= 4:
+            d = int(num[3])
+            pos_freq[d] += 1
+    scores = {}
+    for digit in range(10):
+        sc = (pos_freq.get(digit, 0) / (max(pos_freq.values()) or 1)) * 40
+        scores[digit] = round(sc, 2)
+    sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [d for d, s in sorted_s[:7]]
+
 # ========== FUNGSI 2D ==========
 def gen2d(top6):
     result = []
@@ -196,8 +230,9 @@ def gen3d(f2, top3):
 # ========== FUNGSI UTAMA ==========
 def main():
     os.system('clear')
+    
     cprint("\n" + "="*50, Colors.CYAN)
-    cprint("   🔷 PREDIKTOR 6 ANGKA - TERMUX", Colors.BOLD + Colors.CYAN)
+    cprint("   🔷 PREDIKSI ANGKA MAIN - TERMUX", Colors.BOLD + Colors.CYAN)
     cprint("="*50, Colors.CYAN)
     
     cprint("\n📊 PILIH PASARAN:", Colors.YELLOW)
@@ -218,7 +253,8 @@ def main():
     csv = fetch_github_csv(choice)
     if not csv:
         cprint("❌ Gagal ambil data. Cek internet!", Colors.RED)
-        return    
+        return
+    
     data, _ = parse_csv(csv)
     if len(data) < 15:
         cprint(f"❌ Data kurang ({len(data)}). Minimal 15.", Colors.RED)
@@ -229,6 +265,8 @@ def main():
     
     h6 = calc6(data)
     h3 = calc3(data)
+    kepala = calc_kepala(data)
+    ekor = calc_ekor(data)
     
     cprint("\n" + "="*50, Colors.CYAN)
     cprint(f"🔷 HASIL: {m_name}", Colors.BOLD + Colors.MAGENTA)
@@ -236,6 +274,9 @@ def main():
     
     cprint(f"\n🔷 6 ANGKA: {Colors.BOLD + Colors.YELLOW}{' - '.join(map(str, h6['h6']))}{Colors.RESET}", Colors.WHITE)
     cprint(f"🏆 3D TOP : {Colors.BOLD + Colors.GREEN}{' - '.join(map(str, h3['h3']))}{Colors.RESET}", Colors.WHITE)
+    
+    cprint(f"\n🎯 7 KEPALA (Puluhan): {Colors.BOLD + Colors.BLUE}{' - '.join(map(str, kepala))}{Colors.RESET}", Colors.WHITE)
+    cprint(f"🎯 7 EKOR (Satuan)   : {Colors.BOLD + Colors.RED}{' - '.join(map(str, ekor))}{Colors.RESET}", Colors.WHITE)
     
     c2 = gen2d(h6['h6'])
     cprint(f"\n🔢 2D AUTO ({Colors.CYAN}{len(c2)}{Colors.RESET} kombinasi):", Colors.WHITE)
@@ -256,7 +297,6 @@ def main():
                 cprint("  " + " ".join(f_c2), Colors.WHITE)
             else:
                 cprint("  " + " ".join(f_c2[:30]) + f" ... ({len(f_c2)-30} lainnya)", Colors.WHITE)
-    
     c3 = gen3d(f_c2, h3['h3'])
     if c3:
         cprint(f"\n🎲 3D COMBO ({Colors.MAGENTA}{len(c3)}{Colors.RESET} kombinasi):", Colors.WHITE)
@@ -264,6 +304,16 @@ def main():
             cprint("  " + " ".join(c3), Colors.WHITE)
         else:
             cprint("  " + " ".join(c3[:30]) + f" ... ({len(c3)-30} lainnya)", Colors.WHITE)
+    
+    ke_combo = []
+    for k in kepala:
+        for e in ekor:
+            ke_combo.append(f"{k}{e}")
+    cprint(f"\n💎 KEPALA*EKOR ({Colors.YELLOW}{len(ke_combo)}{Colors.RESET} kombinasi):", Colors.WHITE)
+    if len(ke_combo) <= 50:
+        cprint("  " + " ".join(ke_combo), Colors.WHITE)
+    else:
+        cprint("  " + " ".join(ke_combo[:30]) + f" ... ({len(ke_combo)-30} lainnya)", Colors.WHITE)
     
     save = input(Colors.GREEN + "\n💾 Simpan ke file? (y/n): " + Colors.RESET).lower()
     if save == 'y':
@@ -278,11 +328,14 @@ def main():
             f.write(f"Data: {len(data)} putaran\n\n")
             f.write(f"6 ANGKA: {' - '.join(map(str, h6['h6']))}\n")
             f.write(f"3D TOP: {' - '.join(map(str, h3['h3']))}\n\n")
-            f.write(f"2D ({len(c2)}):\n" + "\n".join(c2) + "\n\n")
+            f.write(f"7 KEPALA: {' - '.join(map(str, kepala))}\n")
+            f.write(f"7 EKOR: {' - '.join(map(str, ekor))}\n\n")
+            f.write(f"2D ({len(c2)}):\n" + "*".join(c2) + "\n\n")
             if filt and f_c2 != c2:
-                f.write(f"2D FILTERED ({len(f_c2)}):\n" + "\n".join(f_c2) + "\n\n")
+                f.write(f"2D FILTERED ({len(f_c2)}):\n" + "*".join(f_c2) + "\n\n")
             if c3:
-                f.write(f"3D COMBO ({len(c3)}):\n" + "\n".join(c3) + "\n")
+                f.write(f"3D COMBO ({len(c3)}):\n" + "*".join(c3) + "\n\n")
+            f.write(f"KEPALA*EKOR ({len(ke_combo)}):\n" + "*".join(ke_combo) + "\n")
             f.write("="*50 + "\n")
             f.write("Gunakan dengan bijak. Good luck! 🍀\n")
         cprint(f"\n✅ Tersimpan di: {Colors.GREEN}{path}{Colors.RESET}", Colors.WHITE)
