@@ -1,327 +1,296 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-📝 DAILY SUMMARY
-Ringkasan harian untuk setiap hari
+📝 DAILY SUMMARY v3.0 - GLOBAL REPORT EDITION (FIXED)
+Comprehensive daily/weekly report with GitHub Market Data Integration
 """
 
 import os
-from datetime import datetime, timedelta
-from collections import Counter
+import csv
+import requests
 import re
+from datetime import datetime, timedelta
+from collections import Counter, defaultdict
 
-# ========== WARNA ANSI ==========
-class Colors:
-    RESET = '\033[0m'
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
+# ========== KONFIGURASI GITHUB ==========
+GITHUB_CONFIG = {
+    'username': 'MOMODIGITAL',
+    'repo': 'data-vault',
+    'branch': 'main',
+    'path': 'data'
+}
+
+MARKET_FILES = {
+    1: ('magnum-cambodia', 'magnum-cambodia.csv'),
+    2: ('sydney-pools', 'sydney-pools.csv'),
+    3: ('sydney-lotto', 'sydney-lotto.csv'),
+    4: ('china-pools', 'china-pools.csv'),
+    5: ('singapore', 'singapore.csv'),
+    6: ('taiwan', 'taiwan.csv'),
+    7: ('hongkong-pools', 'hongkong-pools.csv'),
+    8: ('hongkong-lotto', 'hongkong-lotto.csv'),
+    9: ('newyork-evening', 'newyork-evening.csv'),
+    10: ('kentucky-evening', 'kentucky-evening.csv')
+}
+
+MARKET_NAMES = {
+    1: 'Magnum Cambodia', 2: 'Sydney Pools', 3: 'Sydney Lotto',
+    4: 'China Pools', 5: 'Singapore', 6: 'Taiwan',
+    7: 'Hongkong Pools', 8: 'Hongkong Lotto', 9: 'New York Evening', 10: 'Kentucky Evening'
+}
 
 class DailySummary:
     def __init__(self):
         self.summary_dir = '/sdcard/Prediktor_Summary'
-        self.download_dir = '/sdcard/Download'
+        self.export_dir = '/sdcard/Download/Summary_Reports'
         
-        # Buat direktori jika belum ada
-        if not os.path.exists(self.summary_dir):
-            os.makedirs(self.summary_dir)
+        # Create directories
+        for directory in [self.summary_dir, self.export_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
         
         self.file_prefix = 'summary_'
     
-    def generate_daily_summary(self):
-        """Generate daily summary of predictions made"""
+    class Colors:
+        RESET = '\033[0m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        BLUE = '\033[94m'
+        CYAN = '\033[96m'
+        WHITE = '\033[97m'
+        MAGENTA = '\033[95m'
+        RED = '\033[91m'
+        BOLD = '\033[1m'
+    
+    @staticmethod
+    def cprint(text, color=None, end='\n'):
+        try:
+            if color:
+                formatted = f"{color}{text}{DailySummary.Colors.RESET}"
+            else:
+                formatted = str(text)
+            print(formatted, end=end)
+        except Exception:
+            print(str(text), end=end)
+    
+    def fetch_market_stats(self, market_key):
+        """Fetch current market statistics from GitHub"""
+        file_info = MARKET_FILES.get(market_key)
+        if not file_info:
+            return None
         
-        # Get today's date
+        url = f"https://raw.githubusercontent.com/{GITHUB_CONFIG['username']}/{GITHUB_CONFIG['repo']}/{GITHUB_CONFIG['branch']}/{GITHUB_CONFIG['path']}/{file_info[1]}"
+        
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            
+            data = []
+            for line in r.text.strip().split('\n')[1:]:
+                if not line: continue
+                parts = line.split(',')
+                if len(parts) >= 2:
+                    match = re.search(r'\d{4}', parts[1].strip())
+                    if match and len(match.group()) == 4:
+                        data.append(match.group())
+            
+            if not data:
+                return None
+            
+            # Last draw
+            last_draw = data[-1] if data else "N/A"
+            
+            # Digit frequency
+            all_digits = [d for num in data for d in num]
+            digit_freq = Counter(all_digits)
+            hot = [d for d, c in digit_freq.most_common(3)]
+            freq = len(data)
+            
+            return {
+                'last': last_draw,
+                'hot_digits': hot,
+                'freq': freq,
+                'date': datetime.now().strftime('%Y-%m-%d')
+            }
+        except Exception as e:
+            self.cprint(f"⚠️ Error fetch market {market_key}: {e}", self.Colors.YELLOW)
+            return None
+    
+    def generate_daily_summary(self):
         today = datetime.now()
         today_str = today.strftime('%Y-%m-%d')
         
-        # Cek direktori Download
-        if not os.path.exists(self.download_dir):
-            print(f"{Colors.YELLOW}⚠️ Direktori Download tidak ditemukan{Colors.RESET}")
-            return self.get_empty_summary(today)
+        # Count files created today
+        files_today = []
+        download_dir = '/sdcard/Download'
         
-        # Count today's files
-        pred_files = []
-        try:
-            for f in os.listdir(self.download_dir):
-                if f.startswith(('prediktor_', 'shio_', 'confidence_')):
-                    pred_files.append(f)
-        except Exception as e:
-            print(f"{Colors.RED}❌ Error membaca direktori: {e}{Colors.RESET}")
-            return self.get_empty_summary(today)
+        if os.path.exists(download_dir):
+            for f in os.listdir(download_dir):
+                try:
+                    file_path = os.path.join(download_dir, f)
+                    if os.path.isfile(file_path):
+                        # Check file modification time
+                        mod_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+                        if mod_time.strftime('%Y-%m-%d') == today_str:
+                            files_today.append(f)
+                except:
+                    pass
         
-        # Hitung berdasarkan jenis
-        total_preds = len([f for f in pred_files if f.startswith('prediktor_')])
-        total_shio = len([f for f in pred_files if f.startswith('shio_')])
-        total_conf = len([f for f in pred_files if f.startswith('confidence_')])
+        total_preds = len([f for f in files_today if f.lower().startswith('prediktor_')])
+        total_shio = len([f for f in files_today if f.lower().startswith('shio_')])
+        total_conf = len([f for f in files_today if f.lower().startswith('confidence_')])
+        total_analysis = len([f for f in files_today if f.lower().startswith('pola_')])
         
-        # Filter file hari ini
-        today_only_preds = []
-        for f in pred_files:
-            try:
-                # Extract timestamp dari nama file (format: nama_timestamp.txt)
-                # Contoh: prediktor_20240315_143022.txt
-                match = re.search(r'(\d{8})_(\d{6})', f)
-                if match:
-                    file_date_str = match.group(1)
-                    file_date = datetime.strptime(file_date_str, '%Y%m%d')
-                    if file_date.strftime('%Y-%m-%d') == today_str:
-                        today_only_preds.append(f)
-            except Exception as e:
-                # Skip jika gagal parse
-                continue
+        today_only = total_preds + total_shio + total_conf + total_analysis
         
-        total_today = len(today_only_preds)
+        # Fetch global market stats
+        global_markets = {}
+        for m_key in MARKET_FILES.keys():
+            stats = self.fetch_market_stats(m_key)
+            if stats:
+                global_markets[m_key] = stats
         
-        # Hitung berdasarkan jenis untuk hari ini
-        today_preds = len([f for f in today_only_preds if f.startswith('prediktor_')])
-        today_shio = len([f for f in today_only_preds if f.startswith('shio_')])
-        today_conf = len([f for f in today_only_preds if f.startswith('confidence_')])
-        
-        summary = {
+        return {
             'date': today.strftime('%d/%m/%Y'),
-            'time': today.strftime('%H:%M:%S'),
+            'time': today.strftime('%H:%M'),
             'total_predictions': total_preds,
             'total_shio': total_shio,
             'total_confidence': total_conf,
-            'today_preds': today_preds,
-            'today_shio': today_shio,
-            'today_conf': today_conf,
-            'today_count': total_today,
-            'combo_estimate': total_today * 100,
-            'budget_estimate': total_today * 50000,  # Rp 50.000 per sesi
-            'files': today_only_preds
-        }
-        
-        return summary
-    
-    def get_empty_summary(self, today):
-        """Return empty summary when no data"""
-        return {
-            'date': today.strftime('%d/%m/%Y'),
-            'time': today.strftime('%H:%M:%S'),
-            'total_predictions': 0,
-            'total_shio': 0,
-            'total_confidence': 0,
-            'today_preds': 0,
-            'today_shio': 0,
-            'today_conf': 0,
-            'today_count': 0,
-            'combo_estimate': 0,
-            'budget_estimate': 0,
-            'files': []
+            'total_analysis': total_analysis,
+            'today_count': today_only,
+            'combo_estimate': today_only * 100,
+            'budget_estimate': today_only * 50,
+            'global_markets': global_markets
         }
     
-    def display_summary(self, summary):
-        """Display today's summary"""
-        print("\n" + "="*50)
-        print(f"{Colors.MAGENTA}📝 RINGKASAN HARIAN{Colors.RESET}")
-        print("="*50)
+    def display_global_summary(self, summary):
+        now = datetime.now()
+        week_start = now - timedelta(days=now.weekday())
         
-        print(f"\n{Colors.WHITE}Tanggal: {summary['date']}{Colors.RESET}")
-        print(f"{Colors.WHITE}Waktu  : {summary['time']}{Colors.RESET}")
+        print("\n" + "="*60)
+        self.cprint("📝 GLOBAL SUMMARY - DAILY + MARKET STATUS", self.Colors.MAGENTA + self.Colors.BOLD)
+        print("="*60)
         
-        print("\n" + "-"*50)
-        print(f"{Colors.CYAN}📊 STATISTIK PREDIKSI:{Colors.RESET}")
-        print(f"Total Semua Prediktor : {summary['total_predictions']} file")
-        print(f"Total Semua Shio      : {summary['total_shio']} file")
-        print(f"Total Semua Confidence: {summary['total_confidence']} file")
+        print(f"\n{self.Colors.WHITE}Tanggal: {summary['date']}{self.Colors.RESET}")
+        print(f"{self.Colors.WHITE}Waktu  : {summary['time']}{self.Colors.RESET}")
         
-        print("\n" + "-"*50)
-        print(f"{Colors.GREEN}📈 PREDIKSI HARI INI:{Colors.RESET}")
-        print(f"Prediktor     : {summary['today_preds']} file")
-        print(f"Shio          : {summary['today_shio']} file")
-        print(f"Confidence    : {summary['today_conf']} file")
-        print(f"{Colors.YELLOW}Total File    : {summary['today_count']} file{Colors.RESET}")
+        print("\n" + "-"*60)
+        self.cprint("📊 PREDIKSI HARI INI:", self.Colors.CYAN)
+        print(f"PREDIKTOR    : {summary['total_predictions']} file")
+        print(f"SHIO         : {summary['total_shio']} file")
+        print(f"CONFIDENCE   : {summary['total_confidence']} file")
+        print(f"ANALISIS     : {summary['total_analysis']} file")
+        print(f"\nTotal File   : {summary['today_count']}")
         
-        # Daftar file hari ini
-        if summary['files']:
-            print(f"\n{Colors.BLUE}📋 Daftar File:{Colors.RESET}")
-            for i, f in enumerate(summary['files'][-10:], 1):  # Tampilkan max 10 file
-                print(f"  {i}. {f}")
-            if len(summary['files']) > 10:
-                print(f"  ... dan {len(summary['files']) - 10} file lainnya")
-        
-        print("\n" + "-"*50)
-        print(f"{Colors.YELLOW}💰 ESTIMASI BIAYA:{Colors.RESET}")
-        print(f"Total Kombinasi: ~{summary['combo_estimate']:,} kombinasi")
+        print("\n" + "-"*60)
+        self.cprint("💰 ESTIMASI BIAYA:", self.Colors.YELLOW)
+        print(f"Kombo Total  : ~{summary['combo_estimate']} kombinasi")
         print(f"Estimasi Budget: Rp {summary['budget_estimate']:,}")
         
         # Weekly trend
-        print("\n" + "-"*50)
-        print(f"{Colors.BLUE}📅 TREND MINGGU INI:{Colors.RESET}")
+        print("\n" + "-"*60)
+        self.cprint("📅 TREND MINGGU INI:", self.Colors.BLUE)
+        week_progress = min(summary['total_predictions'] / 20 * 100, 100)
+        bar = "█" * int(week_progress/10) + "░" * (10 - int(week_progress/10))
         
-        # Hitung total minggu ini
-        week_start = datetime.now() - timedelta(days=datetime.now().weekday())
-        week_total = self.get_week_total(week_start)
+        if summary['total_predictions'] < 20:
+            remaining = 20 - summary['total_predictions']
+            self.cprint(f"Target Minggu: {remaining} sesi lagi untuk mencapai 20!", self.Colors.GREEN)
+        else:
+            self.cprint("TARGET MINGGU TERCAPAI! ✅", self.Colors.GREEN)
         
-        print(f"Minggu ini    : {week_total} sesi prediksi")
-        print(f"Target minggu : 20 sesi")
+        print(f"Maju         : {week_progress:.1f}% [{bar}]")
         
-        progress = min(100, (week_total / 20 * 100)) if week_total > 0 else 0
-        bar_len = int(progress / 10)
-        bar = "█" * bar_len + "░" * (10 - bar_len)
-        print(f"Progress      : {progress:.1f}% [{bar}]")
+        # Global Markets Status
+        print("\n" + "-"*60)
+        self.cprint("🌐 STATUS PASARAN GLOBAL (GitHub):", self.Colors.MAGENTA)
+        print("-"*60)
+        
+        if summary['global_markets']:
+            displayed = 0
+            sorted_markets = sorted(summary['global_markets'].items(), key=lambda x: x[1]['freq'], reverse=True)
+            
+            for m_key, stats in sorted_markets:
+                if displayed >= 5:
+                    self.cprint(f"... dan {len(summary['global_markets']) - 5} lainnya", self.Colors.CYAN)
+                    break
+                
+                name = MARKET_NAMES.get(m_key, f"Market {m_key}")
+                self.cprint(f"{name:<20} | Data: {stats['freq']:>4} | Hot: {', '.join(map(str, stats['hot_digits']))}", self.Colors.WHITE)
+                displayed += 1
+        else:
+            self.cprint("Tidak ada data pasar terkini", self.Colors.RED)
         
         # Recommendations
-        print("\n" + "-"*50)
-        print(f"{Colors.GREEN}💡 REKOMENDASI:{Colors.RESET}")
+        print("\n" + "-"*60)
+        self.cprint("💡 REKOMENDASI:", self.Colors.GREEN)
         
-        if summary['today_count'] == 0:
-            print("❌ Tidak ada prediksi hari ini - Siap untuk besok!")
-            print("   Jalankan prediktor.py untuk memulai.")
-        elif summary['today_count'] < 3:
-            print("⚠️ Cukup - Tingkatkan lagi besok!")
-            print("   Targetkan minimal 3-5 prediksi per hari.")
-        elif summary['today_count'] < 6:
-            print("✅ Baik - Pertahankan konsistensi!")
-            print("   Anda sudah produktif hari ini.")
+        if summary['today_count'] < 1:
+            self.cprint("• Tidak ada prediksi hari ini - Siap besok?", self.Colors.WHITE)
+        elif summary['today_count'] < 5:
+            self.cprint("• Cukup - Tingkatkan besok!", self.Colors.YELLOW)
         else:
-            print("🔥 Sangat produktif - Luar biasa!")
-            print("   Pertahankan semangat ini!")
+            self.cprint("• Sangat produktif - Pertahankan!", self.Colors.GREEN)
         
-        print(f"\n{Colors.CYAN}💡 Tips: Gunakan kombinasi tools untuk hasil terbaik:")
-        print("   • prediktor.py -> Angka main")
-        print("   • shio.py -> Angka shio")
-        print("   • confidence.py -> Skor keyakinan")
-        print(f"   • pola.py -> Analisis pola{Colors.RESET}")
+        # Top performing markets
+        if summary['global_markets']:
+            top_markets = sorted(summary['global_markets'].items(), key=lambda x: x[1]['freq'], reverse=True)[:3]
+            self.cprint("\n🏆 3 Pasar Teraktif Hari Ini:", self.Colors.CYAN)
+            for i, (key, val) in enumerate(top_markets, 1):
+                self.cprint(f"  {i}. {MARKET_NAMES[key]} ({val['freq']} putaran)", self.Colors.WHITE)
         
-        # Save to file
-        print("\n" + "="*50)
-        save = input(f"{Colors.GREEN}💾 Simpan ringkasan ke file? (y/n): {Colors.RESET}").lower()
+        # Save options
+        save = input(f"\n{self.Colors.GREEN}💾 Simpan ringkasan lengkap? (y/n): {self.Colors.RESET}").lower()
         
         if save == 'y':
-            self.save_summary(summary)
+            fname = f"{self.file_prefix}{now.strftime('%Y%m%d')}_{now.strftime('%H%M%S')}_FULL.txt"
+            path = os.path.join(self.export_dir, fname)
+            
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write("="*60 + "\n")
+                    f.write("GLOBAL SUMMARY - DAILY + MARKET STATUS\n")
+                    f.write("="*60 + "\n\n")
+                    f.write(f"Tanggal: {summary['date']}\nWaktu: {summary['time']}\n\n")
+                    
+                    f.write("PREDIKSI HARI INI:\n")
+                    f.write(f"Prediktor: {summary['total_predictions']}\n")
+                    f.write(f"Shio: {summary['total_shio']}\n")
+                    f.write(f"Confidence: {summary['total_confidence']}\n")
+                    f.write(f"Analysis: {summary['total_analysis']}\n\n")
+                    
+                    f.write("GLOBAL MARKETS (Last Update):\n")
+                    for m_key, stats in summary['global_markets'].items():
+                        f.write(f"- {MARKET_NAMES[m_key]}: {stats['freq']} puts, Hot: {stats['hot_digits']}\n")
+                
+                self.cprint(f"\n✅ Tersimpan: {path}", self.Colors.GREEN)
+            except Exception as e:
+                self.cprint(f"\n❌ Error menyimpan: {e}", self.Colors.RED)
     
-    def get_week_total(self, week_start):
-        """Get total predictions for current week"""
-        total = 0
-        week_end = week_start + timedelta(days=6)
-        
-        if not os.path.exists(self.download_dir):
-            return 0
-        
+    def view_all_summaries(self):
+        summaries = []
         try:
-            for f in os.listdir(self.download_dir):
-                if f.startswith(('prediktor_', 'shio_', 'confidence_')):
-                    match = re.search(r'(\d{8})', f)
-                    if match:
-                        file_date = datetime.strptime(match.group(1), '%Y%m%d')
-                        if week_start <= file_date <= week_end:
-                            total += 1
+            for f in os.listdir(self.export_dir):
+                if f.startswith(self.file_prefix) and f.endswith('.txt'):
+                    summaries.append(f)
         except:
             pass
         
-        return total
-    
-    def save_summary(self, summary):
-        """Save summary to file"""
-        today = datetime.now()
-        fname = f"{self.file_prefix}{today.strftime('%Y%m%d')}_{today.strftime('%H%M%S')}.txt"
-        path = os.path.join(self.summary_dir, fname)
-        
-        try:
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write("="*50 + "\n")
-                f.write("📝 DAILY SUMMARY - RINGKASAN HARIAN\n")
-                f.write("="*50 + "\n\n")
-                f.write(f"Tanggal: {summary['date']}\n")
-                f.write(f"Waktu  : {summary['time']}\n\n")
-                
-                f.write("STATISTIK PREDIKSI:\n")
-                f.write(f"Total Semua Prediktor : {summary['total_predictions']} file\n")
-                f.write(f"Total Semua Shio      : {summary['total_shio']} file\n")
-                f.write(f"Total Semua Confidence: {summary['total_confidence']} file\n\n")
-                
-                f.write("PREDIKSI HARI INI:\n")
-                f.write(f"Prediktor     : {summary['today_preds']} file\n")
-                f.write(f"Shio          : {summary['today_shio']} file\n")
-                f.write(f"Confidence    : {summary['today_conf']} file\n")
-                f.write(f"Total File    : {summary['today_count']} file\n\n")
-                
-                if summary['files']:
-                    f.write("DAFTAR FILE:\n")
-                    for i, file in enumerate(summary['files'], 1):
-                        f.write(f"{i:3}. {file}\n")
-                    f.write("\n")
-                
-                f.write("ESTIMASI BIAYA:\n")
-                f.write(f"Total Kombinasi: {summary['combo_estimate']:,} kombinasi\n")
-                f.write(f"Estimasi Budget: Rp {summary['budget_estimate']:,}\n\n")
-                
-                f.write("="*50 + "\n")
-                f.write(f"Dibuat: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
-            
-            print(f"\n{Colors.GREEN}✅ Tersimpan: {path}{Colors.RESET}")
-        except Exception as e:
-            print(f"{Colors.RED}❌ Gagal menyimpan: {e}{Colors.RESET}")
-    
-    def view_all_summaries(self):
-        """View all past summaries"""
-        if not os.path.exists(self.summary_dir):
-            print(f"\n{Colors.YELLOW}⚠️ Belum ada ringkasan tersimpan{Colors.RESET}")
-            return
-        
-        summaries = []
-        try:
-            for f in os.listdir(self.summary_dir):
-                if f.startswith(self.file_prefix) and f.endswith('.txt'):
-                    summaries.append(f)
-        except Exception as e:
-            print(f"{Colors.RED}❌ Error: {e}{Colors.RESET}")
-            return
-        
         if not summaries:
-            print(f"\n{Colors.YELLOW}⚠️ Belum ada ringkasan tersimpan{Colors.RESET}")
+            self.cprint("\nBelum ada ringkasan tersimpan", self.Colors.YELLOW)
             return
         
-        # Urutkan berdasarkan tanggal (terbaru dulu)
+        print("\n" + "="*60)
+        self.cprint("RINGKASAN SEJARAH", self.Colors.BLUE)
+        print("="*60)
+        
+        # Sort by date (newest first)
         summaries.sort(reverse=True)
         
-        print("\n" + "="*50)
-        print(f"{Colors.BLUE}📜 RINGKASAN SEJARAH{Colors.RESET}")
-        print("="*50)
+        for i, f in enumerate(summaries[:10], 1):
+            print(f"{i}. {f}")
         
-        for i, f in enumerate(summaries[:10], 1):  # Tampilkan 10 terbaru
-            # Extract tanggal dari nama file
-            try:
-                date_str = f.replace(self.file_prefix, '').split('_')[0]
-                date_obj = datetime.strptime(date_str, '%Y%m%d')
-                display_date = date_obj.strftime('%d/%m/%Y')
-                print(f"{i:2}. {display_date} - {f}")
-            except:
-                print(f"{i:2}. {f}")
-        
-        if len(summaries) > 10:
-            print(f"\n... dan {len(summaries) - 10} file lainnya")
-        
-        # Opsi untuk melihat detail
-        print(f"\n{Colors.CYAN}Ketik nomor untuk melihat detail (0 untuk kembali):{Colors.RESET}")
-        try:
-            choice = int(input("> ").strip())
-            if 1 <= choice <= min(10, len(summaries)):
-                self.view_summary_detail(os.path.join(self.summary_dir, summaries[choice-1]))
-        except ValueError:
-            pass
-        except Exception:
-            pass
-    
-    def view_summary_detail(self, filepath):
-        """View detail of a specific summary file"""
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            print("\n" + "="*50)
-            print(f"{Colors.MAGENTA}📄 DETAIL RINGKASAN{Colors.RESET}")
-            print("="*50)
-            print(content)
-        except Exception as e:
-            print(f"{Colors.RED}❌ Error membaca file: {e}{Colors.RESET}")
+        input("\nTekan Enter untuk kembali...")
 
 
 def main():
@@ -329,81 +298,64 @@ def main():
     
     while True:
         os.system('clear' if os.name == 'posix' else 'cls')
-        print("\n" + "="*50)
-        print(f"{Colors.MAGENTA}📝 RINGKASAN HARIAN PREDIKTOR{Colors.RESET}")
-        print("="*50)
-        print("\n1. 📊 Generate Summary Hari Ini")
+        print("\n" + "="*60)
+        summary.cprint("📝 RINGKASAN HARIAN v3.0", summary.Colors.MAGENTA + summary.Colors.BOLD)
+        print("="*60)
+        print("\n1. 📊 Generate Summary Global Hari Ini")
         print("2. 📜 Lihat Semua Ringkasan")
         print("3. 📅 Ringkasan Minggu Ini")
-        print("4. 🗑️ Hapus Ringkasan Lama")
-        print("5. Exit")
+        print("4. 🔄 Update Data Pasar (GitHub)")
+        print("X Exit")
         
-        choice = input(f"\n{Colors.GREEN}Pilih (1-5): {Colors.RESET}").strip()
+        choice = input(f"\n{summary.Colors.GREEN}Pilih (1-4/X): {summary.Colors.RESET}").strip().upper()
         
         if choice == '1':
             today_summary = summary.generate_daily_summary()
-            summary.display_summary(today_summary)
-            input("\nTekan Enter untuk lanjut...")
+            summary.display_global_summary(today_summary)
+            input("\nTekan Enter lanjut...")
         
         elif choice == '2':
             summary.view_all_summaries()
-            input("\nTekan Enter untuk lanjut...")
         
         elif choice == '3':
             week_start = datetime.now() - timedelta(days=datetime.now().weekday())
-            week_end = week_start + timedelta(days=6)
+            print(f"\n{summary.Colors.CYAN}Minggu Ini Dimulai: {week_start.strftime('%d/%m/%Y')}{summary.Colors.RESET}")
+            print(f"Hari Ini           : {datetime.now().strftime('%d/%m/%Y')}\n")
             
-            print("\n" + "="*50)
-            print(f"{Colors.CYAN}📅 RINGKASAN MINGGU INI{Colors.RESET}")
-            print("="*50)
-            print(f"\nPeriode: {week_start.strftime('%d/%m/%Y')} - {week_end.strftime('%d/%m/%Y')}")
-            
-            # Hitung progress
             summary_obj = summary.generate_daily_summary()
-            week_total = summary.get_week_total(week_start)
-            
-            print(f"\nTotal Minggu Ini: {week_total} sesi prediksi")
-            
-            remaining = max(0, 20 - week_total)
+            remaining = 20 - summary_obj['total_predictions']
             if remaining > 0:
-                print(f"{Colors.GREEN}Sisa target: {remaining} sesi lagi untuk mencapai 20!{Colors.RESET}")
-                
-                # Estimasi per hari
-                days_left = max(1, 7 - datetime.now().weekday())
-                per_day = remaining / days_left
-                print(f"Target per hari: {per_day:.1f} sesi/hari")
+                print(f"{summary.Colors.GREEN}Target Mingguan: {remaining} sesi lagi untuk mencapai 20!{summary.Colors.RESET}")
             else:
-                print(f"{Colors.GREEN}✅ Target Mingguan Tercapai! ({week_total}/20){Colors.RESET}")
+                print(f"{summary.Colors.GREEN}TARGET MINGGU TERCAPAI! ✅{summary.Colors.RESET}")
             
-            input("\nTekan Enter untuk lanjut...")
+            input("Tekan Enter lanjut...")
         
         elif choice == '4':
-            confirm = input(f"{Colors.RED}⚠️ Hapus semua ringkasan lama? (y/n): {Colors.RESET}").lower()
-            if confirm == 'y':
-                try:
-                    for f in os.listdir(summary.summary_dir):
-                        if f.startswith(summary.file_prefix):
-                            os.remove(os.path.join(summary.summary_dir, f))
-                    print(f"{Colors.GREEN}✅ Semua ringkasan telah dihapus{Colors.RESET}")
-                except Exception as e:
-                    print(f"{Colors.RED}❌ Error: {e}{Colors.RESET}")
-            input("\nTekan Enter untuk lanjut...")
+            print(f"\n{summary.Colors.CYAN}Mengambil data terbaru dari GitHub...{summary.Colors.RESET}")
+            count = 0
+            for m_key in MARKET_FILES.keys():
+                stats = summary.fetch_market_stats(m_key)
+                if stats:
+                    count += 1
+                    print(f"  ✅ {MARKET_NAMES[m_key]}: {stats['freq']} data")
+            print(f"\n{summary.Colors.GREEN}✅ Updated: {count} pasar berhasil refresh{summary.Colors.RESET}")
+            input("Tekan Enter lanjut...")
         
-        elif choice == '5':
-            print(f"\n{Colors.YELLOW}👋 Sampai jumpa!{Colors.RESET}")
+        elif choice == 'X':
             break
         
         else:
-            print(f"{Colors.RED}❌ Pilihan tidak valid!{Colors.RESET}")
-            input("\nTekan Enter untuk lanjut...")
+            print("❌ Pilihan tidak valid")
+            input("Tekan Enter lanjut...")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print(f"\n\n{Colors.YELLOW}⚠️ Dibatalkan.{Colors.RESET}")
+        print(f"\n\n{DailySummary.Colors.YELLOW}⚠️ Dibatalkan.{DailySummary.Colors.RESET}")
     except Exception as e:
-        print(f"{Colors.RED}❌ Error: {e}{Colors.RESET}")
+        print(f"{DailySummary.Colors.RED}❌ Error: {e}{DailySummary.Colors.RESET}")
         import traceback
         traceback.print_exc()
