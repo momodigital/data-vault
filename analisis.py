@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🔍 ANALISIS POLA - BATCH EDITION
+🔍 ANALISIS POLA - BATCH EDITION v2.0 (FIXED)
 Support: Single Market & Multi-Market Auto Run
 GitHub Integration • Pattern Detection • Export TXT
 """
@@ -48,7 +48,6 @@ MARKET_NAMES = {
 }
 
 # 🔧 SETING MODE DI SINI
-# Ubah ke True jika ingin LANGSUNG analisis semua pasaran tanpa pilih
 RUN_ALL_AUTO_MODE = False 
 # ===========================================
 
@@ -64,12 +63,17 @@ class Colors:
     CYAN = '\033[96m'
     WHITE = '\033[97m'
 
-def cprint(text, color=Colors.RESET, **kwargs):
-    """Print dengan warna - mendukung parameter end, sep, dll"""
+def cprint(text, color=Colors.RESET, end='\n'):
+    """Print text with color handling - FIXED VERSION"""
     try:
-        print(f"{color}{text}{Colors.RESET}", **kwargs)
-    except Exception:
-        print(text, **kwargs)
+        if color:
+            formatted = f"{color}{text}{Colors.RESET}"
+        else:
+            formatted = str(text)
+        print(formatted, end=end)
+    except Exception as e:
+        print(str(text), end=end)
+    return True
 
 # ========== FUNGSI FETCH DATA ==========
 def fetch_github_csv(market_key):
@@ -81,17 +85,13 @@ def fetch_github_csv(market_key):
     url = f"https://raw.githubusercontent.com/{GITHUB_CONFIG['username']}/{GITHUB_CONFIG['repo']}/{GITHUB_CONFIG['branch']}/{GITHUB_CONFIG['path']}/{file_info[1]}"
     
     try:
-        cprint(f"  📡 Mengambil data...", Colors.CYAN)
+        cprint(f"  📡 Mengambil data...", Colors.CYAN, end="")
         r = requests.get(url, timeout=30)
         r.raise_for_status()
+        print()  # Newline setelah selesai
         return r.text
-    except requests.exceptions.ConnectionError:
-        cprint(f"  ❌ Gagal koneksi ke GitHub", Colors.RED)
-        return None
-    except requests.exceptions.Timeout:
-        cprint(f"  ❌ Timeout", Colors.RED)
-        return None
     except Exception as e:
+        print()  # Newline setelah error
         cprint(f"  ❌ Error: {e}", Colors.RED)
         return None
 
@@ -114,10 +114,9 @@ def parse_csv(text):
             continue
         parts = line.split(',')
         if len(parts) >= 2:
-            # Cari angka 4 digit di kolom kedua
             match = re.search(r'(\d{4})', parts[1].strip())
-            if match:
-                results.append(match.group(1))
+            if match and len(match.group()) == 4:
+                results.append(match.group())
     
     return results
 
@@ -132,7 +131,7 @@ def detect_patterns(data):
     
     # 1. Ganjil/Genap
     odd_even = []
-    for num in data[-50:]:  # Gunakan 50 data terakhir
+    for num in data[-50:]:
         if len(num) == 4:
             odds = sum(int(c) % 2 for c in num)
             if odds >= 3:
@@ -193,19 +192,15 @@ def detect_patterns(data):
             pos_stats[f'Pos{p+1}'] = counter.most_common(5)
     patterns['positions'] = pos_stats
     
-    # 5. Top 2D (2 digit terakhir)
+    # 5. Top 2D
     two_d = Counter([d[2:] for d in data[-50:] if len(d) == 4]).most_common(10)
     patterns['two_d_top'] = two_d
     
-    # 6. Top 3D (3 digit pertama)
-    three_d = Counter([d[:3] for d in data[-50:] if len(d) == 4]).most_common(10)
-    patterns['three_d_top'] = three_d
-    
-    # 7. Frekuensi digit terakhir
+    # 6. Frekuensi digit terakhir
     last_digit = Counter([d[3] for d in data[-50:] if len(d) == 4]).most_common(5)
     patterns['last_digit_freq'] = last_digit
     
-    # 8. Gap Analysis untuk digit terakhir
+    # 7. Gap Analysis
     last_seen = defaultdict(list)
     for idx, num in enumerate(data):
         if len(num) == 4:
@@ -218,25 +213,23 @@ def detect_patterns(data):
             gap_stats[digit] = {
                 'avg': round(sum(gaps) / len(gaps), 1), 
                 'max': max(gaps),
-                'last_seen': len(data) - positions[-1] - 1 if positions else 0
+                'last_seen': len(data) - positions[-1] - 1
             }
     
-    # Urutkan berdasarkan rata-rata gap terbesar
-    sorted_gaps = sorted(gap_stats.items(), key=lambda x: x[1]['avg'], reverse=True)[:5]
-    patterns['gaps'] = dict(sorted_gaps)
+    patterns['gaps'] = dict(sorted(gap_stats.items(), key=lambda x: x[1]['avg'], reverse=True)[:5])
     
     return patterns
 
 # ========== FUNGSI DISPLAY HASIL ==========
 def display_patterns(patterns, market_name, market_num):
     """Tampilkan hasil analisis pola"""
-    cprint(f"\n{'='*50}", Colors.CYAN)
+    print("\n" + "="*50)
     cprint(f"[#{market_num}] ANALISIS: {market_name}", Colors.MAGENTA + Colors.BOLD)
-    cprint('='*50, Colors.CYAN)
+    print("="*50)
     
     if isinstance(patterns, dict) and 'error' in patterns:
         cprint(f"{Colors.RED}⚠️ {patterns['error']}{Colors.RESET}")
-        return False
+        return False    
     
     # Odd/Even
     oe = patterns['odd_even']['ratio']
@@ -267,14 +260,6 @@ def display_patterns(patterns, market_name, market_num):
         cprint(f"\n🔢 TOP 5 2D:", Colors.GREEN + Colors.BOLD)
         for i, (num, count) in enumerate(patterns['two_d_top'][:5], 1):
             bar_len = int(count / patterns['two_d_top'][0][1] * 20) if patterns['two_d_top'] else 0
-            bar = "█" * bar_len
-            cprint(f"   {i}. {num}: {count}x [{bar}]", Colors.WHITE)
-    
-    # Top 3D
-    if patterns['three_d_top']:
-        cprint(f"\n🔢 TOP 5 3D:", Colors.CYAN + Colors.BOLD)
-        for i, (num, count) in enumerate(patterns['three_d_top'][:5], 1):
-            bar_len = int(count / patterns['three_d_top'][0][1] * 20) if patterns['three_d_top'] else 0
             bar = "█" * bar_len
             cprint(f"   {i}. {num}: {count}x [{bar}]", Colors.WHITE)
     
@@ -320,7 +305,6 @@ def save_pattern_file(patterns, market_name):
     safe_name = market_name.replace(' ', '_').lower()
     fname = f"pola_{safe_name}_{timestamp}.txt"
     
-    # Tentukan path penyimpanan
     if os.path.exists('/sdcard'):
         path = os.path.join('/sdcard/Download', fname)
     else:
@@ -348,13 +332,6 @@ def save_pattern_file(patterns, market_name):
                         f.write(f"  {num}: {count}x\n")
                     f.write("\n")
                 
-                # Top 3D
-                if patterns['three_d_top']:
-                    f.write("TOP 5 3D:\n")
-                    for num, count in patterns['three_d_top'][:5]:
-                        f.write(f"  {num}: {count}x\n")
-                    f.write("\n")
-                
                 # Last digit frequency
                 if patterns['last_digit_freq']:
                     f.write("FREKUENSI DIGIT TERAKHIR:\n")
@@ -374,7 +351,7 @@ def save_pattern_file(patterns, market_name):
 def _analyze_single_market(choice):
     """Logika analisis satu pasaran"""
     m_name = MARKET_NAMES[choice]
-    cprint(f"\n{Colors.CYAN}🔄 Loading {m_name}...{Colors.RESET}")
+    print(f"\n{Colors.CYAN}🔄 Loading {m_name}...{Colors.RESET}")
     
     csv_text = fetch_github_csv(choice)
     if not csv_text:
@@ -387,6 +364,8 @@ def _analyze_single_market(choice):
         return False
     
     cprint(f"  ✅ Memproses {len(data)} data...", Colors.GREEN)
+    print()
+    
     patterns = detect_patterns(data)
     display_patterns(patterns, m_name, choice)
     
@@ -398,6 +377,7 @@ def _analyze_single_market(choice):
     
     return True
 
+# ========== MAIN MENU ==========
 def run_market_analysis(choice=None):
     """Analisis untuk 1 atau semua pasaran"""
     market_keys = list(MARKET_NAMES.keys())
@@ -414,7 +394,7 @@ def run_market_analysis(choice=None):
                 cprint(f"\n{Colors.RED}✗ Gagal: {MARKET_NAMES[m_choice]}{Colors.RESET}")
             
             if m_choice != market_keys[-1]:
-                cprint("\n" + "-"*50, Colors.BLUE)
+                print("\n" + "-"*50)
                 input(f"{Colors.CYAN}Tekan Enter untuk lanjut ke pasaran berikutnya...{Colors.RESET}")
             
     elif choice is not None:
@@ -452,13 +432,12 @@ def main():
     cprint("🔍 ANALISIS POLA - MULTI-PASARAN", Colors.MAGENTA + Colors.BOLD)
     print("="*50)
     
-    # Perbaikan di sini - menggunakan print biasa untuk yang pakai end=
-    print(f"\n{Colors.YELLOW}🔧 KONFIGURASI: ", end="")
+    print(f"\n{Colors.YELLOW}🔧 KONFIGURASI: {Colors.RESET}", end="")
     if RUN_ALL_AUTO_MODE:
-        cprint(f"AUTO RUN ALL MARKETS", Colors.GREEN + Colors.BOLD)
+        cprint(f"{Colors.GREEN}AUTO RUN ALL MARKETS{Colors.RESET}", Colors.GREEN)
         cprint(f"  Akan menganalisis {len(MARKET_NAMES)} pasaran secara berurutan", Colors.CYAN)
     else:
-        cprint(f"MANUAL SELECT MODE", Colors.YELLOW + Colors.BOLD)
+        cprint(f"{Colors.YELLOW}MANUAL SELECT MODE{Colors.RESET}", Colors.YELLOW)
         cprint(f"  Edit script: RUN_ALL_AUTO_MODE = True untuk auto run", Colors.CYAN)
     
     print("\n" + "="*50)
@@ -483,7 +462,8 @@ def main():
                 for m_choice in MARKET_NAMES.keys():
                     _analyze_single_market(m_choice)
                     if m_choice != list(MARKET_NAMES.keys())[-1]:
-                        input(f"\n{Colors.CYAN}Tekan Enter untuk lanjut...{Colors.RESET}")
+                        print()
+                        input(f"{Colors.CYAN}Tekan Enter untuk lanjut...{Colors.RESET}")
             else:
                 cprint("  ⚠️ Dibatalkan", Colors.YELLOW)
         else:
