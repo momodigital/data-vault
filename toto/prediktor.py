@@ -1,0 +1,417 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+🔷 PREDIKTOR 6 ANGKA - Termux Edition
+GitHub Integration • Kepala/Ekor • Export TXT • Colored Output
+"""
+
+import requests
+import re
+import os
+import time
+from collections import Counter
+from datetime import datetime
+
+# ========== KONFIGURASI GITHUB ==========
+GITHUB_CONFIG = {
+    'username': 'MOMODIGITAL',
+    'repo': 'data-vault',
+    'branch': 'main',
+    'path': 'data'
+}
+
+MARKET_FILES = {
+    1: ('magnum-cambodia', 'magnum-cambodia.csv'),
+    2: ('sydney-pools', 'sydney-pools.csv'),
+    3: ('sydney-lotto', 'sydney-lotto.csv'),
+    4: ('china-pools', 'china-pools.csv'),
+    5: ('singapore', 'singapore.csv'),
+    6: ('taiwan', 'taiwan.csv'),
+    7: ('hongkong-pools', 'hongkong-pools.csv'),
+    8: ('hongkong-lotto', 'hongkong-lotto.csv'),
+    9: ('newyork-evening', 'newyork-evening.csv'),
+    10: ('kentucky-evening', 'kentucky-evening.csv')
+}
+
+MARKET_NAMES = {
+    1: 'Magnum Cambodia',
+    2: 'Sydney Pools',
+    3: 'Sydney Lotto',
+    4: 'China Pools',
+    5: 'Singapore',
+    6: 'Taiwan',
+    7: 'Hongkong Pools',
+    8: 'Hongkong Lotto',
+    9: 'New York Evening',
+    10: 'Kentucky Evening'
+}
+
+# ========== WARNA ANSI ==========
+class Colors:
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+
+def cprint(text, color=Colors.RESET):
+    print(f"{color}{text}{Colors.RESET}")
+
+# ========== FUNGSI FETCH DATA ==========
+def fetch_github_csv(market_key):
+    file_info = MARKET_FILES.get(market_key)
+    if not file_info:
+        return None
+    url = f"https://raw.githubusercontent.com/{GITHUB_CONFIG['username']}/{GITHUB_CONFIG['repo']}/{GITHUB_CONFIG['branch']}/{GITHUB_CONFIG['path']}/{file_info[1]}"
+    try:
+        cprint("📡 Mengambil data dari Database...", Colors.CYAN)
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        return r.text
+    except Exception as e:
+        cprint(f"❌ Error: {e}", Colors.RED)
+        return None
+
+# ========== FUNGSI PARSE CSV ==========
+def parse_csv(text):
+    if not text:
+        return [], []
+    results, dates = [], []
+    for line in text.strip().split('\n')[1:]:
+        if not line:
+            continue
+        parts = line.split(',')
+        if len(parts) >= 2:
+            match = re.search(r'\d{4}', parts[1].strip())
+            if match:
+                dates.append(parts[0].strip())
+                results.append(match.group())
+    return results, dates
+
+# ========== FUNGSI 6 ANGKA ==========
+def calc6(data):
+    if len(data) < 15:
+        return {'h6': [], 'det': []}
+    n = len(data)
+    freq = Counter()
+    pos = {i: Counter() for i in range(4)}
+    d2_freq = Counter()
+    
+    for num in data:
+        if len(num) != 4:
+            continue
+        for j in range(4):
+            d = int(num[j])
+            freq[d] += 1
+            pos[j][d] += 1
+        d2_freq[num[2:]] += 1
+    
+    scores = {}
+    for digit in range(10):
+        sc = 0
+        max_f = max(freq.values()) or 1
+        sc += (freq.get(digit, 0) / max_f) * 20
+        f2 = sum(v for k, v in d2_freq.items() if str(digit) in k)
+        max_2d = max(d2_freq.values()) or 1
+        sc += (f2 / (max_2d * 2)) * 25
+        ps = sum((pos[p].get(digit, 0) / (max(pos[p].values()) or 1)) * 7.5 for p in [2, 3])
+        sc += ps
+        scores[digit] = round(sc, 2)
+    
+    sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return {'h6': [d for d, s in sorted_s[:6]], 'det': sorted_s}
+
+# ========== FUNGSI 3D ==========
+def calc3(data):
+    if len(data) < 15:
+        return {'h3': [], 'det': []}
+    n = len(data)
+    freq = Counter()
+    pos = {i: Counter() for i in [1, 2, 3]}
+    gaps = {i: [] for i in range(10)}
+    
+    for idx, num in enumerate(data):
+        if len(num) != 4:
+            continue
+        for p in [1, 2, 3]:
+            d = int(num[p])
+            freq[d] += 1
+            pos[p][d] += 1
+            gaps[d].append(idx)
+    
+    scores = {}
+    for digit in range(10):
+        sc = 0
+        ts = sum((0.98 ** (n-1-j)) for j in range(n-1, -1, -1) if str(digit) in data[j][1:])
+        sc += min(ts * 4, 25)
+        weights = [5, 7, 8]
+        for i, p in enumerate([1, 2, 3]):
+            mx = max(pos[p].values()) or 1
+            sc += (pos[p].get(digit, 0) / mx) * weights[i]
+        gp = gaps[digit]
+        if not gp:
+            sc += 12
+        else:
+            lg = n - 1 - gp[-1]
+            ag = n / (freq.get(digit, 1) or 1)
+            if lg > ag*1.6:
+                sc += 12
+            elif lg > ag*1.2:
+                sc += 8
+            else:
+                sc += 5
+        sc += 4
+        scores[digit] = round(sc, 2)
+    
+    sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return {'h3': [d for d, s in sorted_s[:3]], 'det': sorted_s}
+
+# ========== FUNGSI KEPALA ==========
+def calc_kepala(data):
+    if len(data) < 15:
+        return []
+    n = len(data)
+    pos_freq = Counter()
+    for num in data:
+        if len(num) >= 3:
+            d = int(num[2])
+            pos_freq[d] += 1
+    scores = {}
+    for digit in range(10):
+        sc = (pos_freq.get(digit, 0) / (max(pos_freq.values()) or 1)) * 40
+        scores[digit] = round(sc, 2)
+    sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [d for d, s in sorted_s[:7]]
+
+# ========== FUNGSI EKOR ==========
+def calc_ekor(data):
+    if len(data) < 15:
+        return []
+    n = len(data)
+    pos_freq = Counter()
+    for num in data:
+        if len(num) >= 4:
+            d = int(num[3])
+            pos_freq[d] += 1
+    scores = {}
+    for digit in range(10):
+        sc = (pos_freq.get(digit, 0) / (max(pos_freq.values()) or 1)) * 40
+        scores[digit] = round(sc, 2)
+    sorted_s = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [d for d, s in sorted_s[:7]]
+
+# ========== FUNGSI 2D ==========
+def gen2d(top6):
+    result = []
+    for i in range(100):
+        s = f"{i:02d}"
+        if int(s[0]) in top6 or int(s[1]) in top6:
+            result.append(s)
+    return result
+
+# ========== FUNGSI 3D COMBO ==========
+def gen3d(f2, top3):
+    if not f2 or not top3:
+        return []
+    res, seen = [], set()
+    for s in f2:
+        a, b = int(s[0]), int(s[1])
+        for x in top3:
+            for p in [f"{a}{b}{x}", f"{a}{x}{b}", f"{b}{a}{x}", f"{b}{x}{a}", f"{x}{a}{b}", f"{x}{b}{a}"]:
+                if p not in seen:
+                    seen.add(p)
+                    res.append(p)
+    return sorted(res, key=int)
+
+# ========== FUNGSI FORMAT OUTPUT UNTUK FILE ==========
+def format_file_output(m_name, data_len, h6, h3, kepala, ekor, c2, f_c2, c3, ke_combo, filt):
+    """Membuat string output untuk file dengan pemisah *"""
+    lines = []
+    
+    # Header
+    lines.append("="*50)
+    lines.append("  🔷 PREDIKTOR 6 ANGKA - HASIL LENGKAP")
+    lines.append("="*50)
+    
+    # Info pasaran dan data
+    lines.append(f"Pasaran: {m_name}")
+    lines.append(f"Tanggal: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    lines.append(f"Data: {data_len} putaran")
+    lines.append("")
+    
+    # Hasil prediksi dengan pemisah *
+    lines.append(f"🔷 6 ANGKA: {'*'.join(map(str, h6['h6']))}")
+    lines.append(f"🏆 3D TOP : {'*'.join(map(str, h3['h3']))}")
+    lines.append("")
+    lines.append(f"🎯 7 KEPALA (Puluhan): {'*'.join(map(str, kepala))}")
+    lines.append(f"🎯 7 EKOR (Satuan)   : {'*'.join(map(str, ekor))}")
+    lines.append("")
+    
+    # 2D AUTO dengan pemisah *
+    lines.append(f"🔢 2D AUTO ({len(c2)} kombinasi):")
+    lines.append("*".join(c2))
+    
+    # Filter jika ada
+    if filt:
+        lines.append("")
+        lines.append(f"✂️ Setelah Filter: {len(f_c2)} dari {len(c2)}")
+        if f_c2:
+            lines.append("*".join(f_c2))
+    
+    # 3D COMBO dengan pemisah *
+    if c3:
+        lines.append("")
+        lines.append(f"🎲 3D COMBO ({len(c3)} kombinasi):")
+        lines.append("*".join(c3))
+    
+    # KEPALA*EKOR dengan pemisah *
+    lines.append("")
+    lines.append(f"💎 KEPALA*EKOR ({len(ke_combo)} kombinasi):")
+    lines.append("*".join(ke_combo))
+    
+    # Footer
+    lines.append("")
+    lines.append("="*50)
+    lines.append("Gunakan dengan bijak. Good luck! 🍀")
+    
+    return "\n".join(lines)
+
+# ========== FUNGSI UTAMA ==========
+def main():
+    os.system('clear')
+    
+    cprint("\n" + "="*50, Colors.CYAN)
+    cprint("   🔷 PREDIKSI ANGKA MAIN - TERMUX", Colors.BOLD + Colors.CYAN)
+    cprint("="*50, Colors.CYAN)
+    
+    cprint("\n📊 PILIH PASARAN:", Colors.YELLOW)
+    for k, v in MARKET_NAMES.items():
+        cprint(f"   {k}. {v}", Colors.WHITE)
+    
+    try:
+        choice = int(input(Colors.GREEN + "\n➤ Nomor Pasaran (1-10): " + Colors.RESET))
+        if choice not in MARKET_FILES:
+            raise ValueError
+    except:
+        cprint("❌ Input salah!", Colors.RED)
+        return
+
+    m_name = MARKET_NAMES[choice]
+    cprint(f"\n🔄 Loading {m_name}...", Colors.CYAN)
+    
+    csv = fetch_github_csv(choice)
+    if not csv:
+        cprint("❌ Gagal ambil data. Cek internet!", Colors.RED)
+        return
+    
+    data, _ = parse_csv(csv)
+    if len(data) < 15:
+        cprint(f"❌ Data kurang ({len(data)}). Minimal 15.", Colors.RED)
+        return
+    
+    cprint(f"✅ Data: {len(data)} putaran. Memproses...", Colors.GREEN)
+    time.sleep(1)
+    
+    h6 = calc6(data)
+    h3 = calc3(data)
+    kepala = calc_kepala(data)
+    ekor = calc_ekor(data)
+    
+    cprint("\n" + "="*50, Colors.CYAN)
+    cprint(f"🔷 HASIL: {m_name}", Colors.BOLD + Colors.MAGENTA)
+    cprint("="*50, Colors.CYAN)
+    
+    cprint(f"\n🔷 6 ANGKA: {Colors.BOLD + Colors.YELLOW}{' - '.join(map(str, h6['h6']))}{Colors.RESET}", Colors.WHITE)
+    cprint(f"🏆 3D TOP : {Colors.BOLD + Colors.GREEN}{' - '.join(map(str, h3['h3']))}{Colors.RESET}", Colors.WHITE)
+    
+    cprint(f"\n🎯 7 KEPALA (Puluhan): {Colors.BOLD + Colors.BLUE}{' - '.join(map(str, kepala))}{Colors.RESET}", Colors.WHITE)
+    cprint(f"🎯 7 EKOR (Satuan)   : {Colors.BOLD + Colors.RED}{' - '.join(map(str, ekor))}{Colors.RESET}", Colors.WHITE)
+    
+    c2 = gen2d(h6['h6'])
+    cprint(f"\n🔢 2D AUTO ({Colors.CYAN}{len(c2)}{Colors.RESET} kombinasi):", Colors.WHITE)
+    
+    if len(c2) <= 50:
+        cprint("  " + " ".join(c2), Colors.WHITE)
+    else:
+        cprint("  " + " ".join(c2[:30]) + f" ... ({len(c2)-30} lainnya)", Colors.WHITE)
+    
+    filt = input(Colors.YELLOW + "\n🔧 Filter digit (contoh: 159) / Enter skip: " + Colors.RESET).strip()
+    f_c2 = c2
+    if filt:
+        digits = [int(x) for x in filt if x.isdigit()]
+        f_c2 = [x for x in c2 if any(int(c) in digits for c in x)]
+        cprint(f"\n✂️ Setelah Filter: {Colors.RED}{len(f_c2)}{Colors.RESET} dari {Colors.CYAN}{len(c2)}{Colors.RESET}", Colors.WHITE)
+        if len(f_c2) > 0:
+            if len(f_c2) <= 50:
+                cprint("  " + " ".join(f_c2), Colors.WHITE)
+            else:
+                cprint("  " + " ".join(f_c2[:30]) + f" ... ({len(f_c2)-30} lainnya)", Colors.WHITE)
+    
+    c3 = gen3d(f_c2, h3['h3'])
+    if c3:
+        cprint(f"\n🎲 3D COMBO ({Colors.MAGENTA}{len(c3)}{Colors.RESET} kombinasi):", Colors.WHITE)
+        if len(c3) <= 50:
+            cprint("  " + " ".join(c3), Colors.WHITE)
+        else:
+            cprint("  " + " ".join(c3[:30]) + f" ... ({len(c3)-30} lainnya)", Colors.WHITE)
+    
+    ke_combo = []
+    for k in kepala:
+        for e in ekor:
+            ke_combo.append(f"{k}{e}")
+    cprint(f"\n💎 KEPALA*EKOR ({Colors.YELLOW}{len(ke_combo)}{Colors.RESET} kombinasi):", Colors.WHITE)
+    if len(ke_combo) <= 50:
+        cprint("  " + " ".join(ke_combo), Colors.WHITE)
+    else:
+        cprint("  " + " ".join(ke_combo[:30]) + f" ... ({len(ke_combo)-30} lainnya)", Colors.WHITE)
+    
+    save = input(Colors.GREEN + "\n💾 Simpan ke file? (y/n): " + Colors.RESET).lower()
+    if save == 'y':
+        fname = f"prediktor_{choice}_{datetime.now().strftime('%H%M%S')}.txt"
+        
+        # Tentukan path penyimpanan
+        if os.path.exists('/sdcard'):
+            download_dir = '/sdcard/Download'
+            if not os.path.exists(download_dir):
+                download_dir = '/sdcard'
+            path = os.path.join(download_dir, fname)
+        else:
+            path = fname
+        
+        # Gunakan fungsi format_file_output untuk membuat konten file dengan pemisah *
+        file_content = format_file_output(
+            m_name, len(data), h6, h3, kepala, ekor, 
+            c2, f_c2, c3, ke_combo, filt
+        )
+        
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(file_content)
+            cprint(f"\n✅ Tersimpan di: {Colors.GREEN}{path}{Colors.RESET}", Colors.WHITE)
+            
+            # Tampilkan pratinjau isi file
+            cprint("\n📄 Pratinjau isi file (dengan pemisah *):", Colors.CYAN)
+            # Tampilkan beberapa baris pertama sebagai pratinjau
+            preview_lines = file_content.split('\n')[:20]
+            for line in preview_lines:
+                print(line)
+            if len(file_content.split('\n')) > 20:
+                print("... (sisanya bisa dilihat di file)")
+            
+        except Exception as e:
+            cprint(f"\n❌ Gagal menyimpan file: {e}", Colors.RED)
+    
+    cprint("\n🔷 Selesai. Jalankan lagi untuk pasaran lain.", Colors.CYAN)
+
+# ========== ENTRY POINT ==========
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        cprint("\n⚠️ Dibatalkan.", Colors.YELLOW)
+    except Exception as e:
+        cprint(f"❌ Error: {e}", Colors.RED)
