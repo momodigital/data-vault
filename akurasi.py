@@ -1,26 +1,43 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🎯 AKURASI TRACKER - Termux Edition
-Track hasil prediksi vs kenyataan
+🎯 AKURASI TRACKER v3.0 - MARKET CONTEXT EDITION (FIXED)
+Track hasil prediksi vs kenyataan dengan konteks pasar dari GitHub
 """
 
 import os
-import re
 import csv
+import requests
+import re
 from datetime import datetime
 from collections import Counter
 
-# ========== WARNA ANSI ==========
-class Colors:
-    RESET = '\033[0m'
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
+# ========== KONFIGURASI GITHUB ==========
+GITHUB_CONFIG = {
+    'username': 'MOMODIGITAL',
+    'repo': 'data-vault',
+    'branch': 'main',
+    'path': 'data'
+}
+
+MARKET_FILES = {
+    1: ('magnum-cambodia', 'magnum-cambodia.csv'),
+    2: ('sydney-pools', 'sydney-pools.csv'),
+    3: ('sydney-lotto', 'sydney-lotto.csv'),
+    4: ('china-pools', 'china-pools.csv'),
+    5: ('singapore', 'singapore.csv'),
+    6: ('taiwan', 'taiwan.csv'),
+    7: ('hongkong-pools', 'hongkong-pools.csv'),
+    8: ('hongkong-lotto', 'hongkong-lotto.csv'),
+    9: ('newyork-evening', 'newyork-evening.csv'),
+    10: ('kentucky-evening', 'kentucky-evening.csv')
+}
+
+MARKET_NAMES = {
+    1: 'Magnum Cambodia', 2: 'Sydney Pools', 3: 'Sydney Lotto',
+    4: 'China Pools', 5: 'Singapore', 6: 'Taiwan',
+    7: 'Hongkong Pools', 8: 'Hongkong Lotto', 9: 'New York Evening', 10: 'Kentucky Evening'
+}
 
 class AkurasiTracker:
     def __init__(self):
@@ -30,94 +47,180 @@ class AkurasiTracker:
         self.records_file = os.path.join(self.db_dir, 'records.csv')
         self._init_db()
     
+    class Colors:
+        RESET = '\033[0m'
+        RED = '\033[91m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        CYAN = '\033[96m'
+        WHITE = '\033[97m'
+        MAGENTA = '\033[95m'
+        BOLD = '\033[1m'
+        BLUE = '\033[94m'
+    
+    @staticmethod
+    def cprint(text, color=None, end='\n'):
+        try:
+            if color:
+                formatted = f"{color}{text}{AkurasiTracker.Colors.RESET}"
+            else:
+                formatted = str(text)
+            print(formatted, end=end)
+        except Exception:
+            print(str(text), end=end)
+    
     def _init_db(self):
-        """Initialize database file"""
         if not os.path.exists(self.records_file):
             with open(self.records_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow(['ID', 'Pasaran', 'Tanggal', 'Real_Result', 
-                               'Predict_6A', 'Predict_2D', 'Predict_Shio',
-                               'Hit_Total', 'ACC_Persen', 'Status'])
+                               'Pred_6A', 'Pred_2D', 'Pred_Shio', 'Status', 'Market_Context', 'ACC_Persen'])
+    
+    def fetch_market_context(self, market_key):
+        """Fetch market statistics from GitHub CSV"""
+        file_info = MARKET_FILES.get(market_key)
+        if not file_info:
+            return {'context_note': 'Market not found'}
+        
+        url = f"https://raw.githubusercontent.com/{GITHUB_CONFIG['username']}/{GITHUB_CONFIG['repo']}/{GITHUB_CONFIG['branch']}/{GITHUB_CONFIG['path']}/{file_info[1]}"
+        
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            text = r.text
+            
+            # Parse data
+            data = []
+            for line in text.strip().split('\n')[1:]:
+                if not line: continue
+                parts = line.split(',')
+                if len(parts) >= 2:
+                    match = re.search(r'\d{4}', parts[1].strip())
+                    if match and len(match.group()) == 4:
+                        data.append(match.group())
+            
+            # Calculate context stats
+            if not data:
+                return {'context_note': 'No data available'}
+            
+            all_digits = [d for num in data for d in num]
+            digit_freq = Counter(all_digits)
+            last_digit_freq = Counter(int(num[3]) for num in data if len(num) == 4)
+            
+            hot_digits = [d for d, c in digit_freq.most_common(5)]
+            # Get cold digits properly
+            all_items = list(digit_freq.items())
+            cold_digits = [d for d, c in sorted(all_items, key=lambda x: x[1])[:5]] if len(all_items) >= 5 else [d for d, c in all_items[:len(all_items)]]
+            last_digits_hot = [d for d, c in last_digit_freq.most_common(5)]
+            
+            return {
+                'count': len(data),
+                'hot': hot_digits,
+                'cold': cold_digits,
+                'last_hot': last_digits_hot,
+                'total_data': len(data)
+            }
+        except Exception as e:
+            self.cprint(f"⚠️ Cannot fetch: {e}", self.Colors.YELLOW)
+            return {'context_note': f'Error: {str(e)[:50]}'}
     
     def input_real_result(self):
-        """Input hasil real dari pasaran"""
         print("\n" + "="*50)
-        print(f"{Colors.MAGENTA}   INPUT HASIL REAL{Colors.RESET}")
+        self.cprint("   INPUT HASIL REAL", self.Colors.MAGENTA + self.Colors.BOLD)
         print("="*50)
         
-        pasaran = input("\n➤ Pasaran: ").strip()
-        tanggal = input("📅 Tanggal (dd/mm/yyyy): ").strip() or datetime.now().strftime('%d/%m/%Y')
-        angka = input("🎯 Hasil Real (4 digit): ").strip()
+        pasaran = input("\n➤ Pasaran (1-10 atau nama): ").strip()
+        tanggal = input("Tanggal (dd/mm/yyyy): ").strip() or datetime.now().strftime('%d/%m/%Y')
+        angka = input("Hasil Real (4 digit): ").strip()
         
         if len(angka) != 4 or not angka.isdigit():
-            print(f"{Colors.RED}❌ Masukkan tepat 4 digit angka!{Colors.RESET}")
-            input("\nTekan Enter untuk kembali...")
+            self.cprint("❌ Masukkan tepat 4 digit angka!", self.Colors.RED)
             return None
         
-        # Input prediksi manual
-        print(f"\n{Colors.YELLOW}📝 Masukkan prediksi (kosongkan jika tidak ada):{Colors.RESET}")
+        # Determine market key
+        market_key = None
+        for k, v in MARKET_NAMES.items():
+            if str(k) == pasaran or v.lower() in pasaran.lower():
+                market_key = k
+                break
         
-        pred_6a = input("6 Angka (pisahkan spasi): ").strip().split()
-        pred_2d = input("2D Combo (pisahkan spasi): ").strip().split()
-        pred_shio = input("Shio: ").strip()
+        # Get market context from GitHub
+        context = self.fetch_market_context(market_key) if market_key else {'note': 'Custom Market'}
+        
+        pred_6a = input("Prediksi 6A (koma/enter skip): ").strip() or '-'
+        pred_2d = input("Prediksi 2D (koma/enter skip): ").strip() or '-'
+        pred_shio = input("Prediksi Shio (skip): ").strip() or '-'
         
         return {
-            'pasaran': pasaran,
+            'pasaran': MARKET_NAMES.get(market_key, pasaran) if market_key else pasaran,
             'tanggal': tanggal,
             'angka': angka,
-            'pred_6a': [p for p in pred_6a if p.isdigit()][:6],
-            'pred_2d': [p for p in pred_2d if p][:10],
-            'pred_shio': pred_shio
+            'pred_6a': pred_6a,
+            'pred_2d': pred_2d,
+            'pred_shio': pred_shio,
+            'market_context': str(context)
         }
     
     def calculate_accuracy(self, record_data):
-        """Hitung akurasi dari real result vs prediksi"""
+        """Hitung akurasi dengan smart scoring"""
         real_digits = list(record_data['angka'])
-        hit_6a = hit_2d = 0
+        hit_score = 0
         
-        # Cek 6A
-        pred_6a_set = set(int(d) for d in record_data['pred_6a'] if d.isdigit())
-        real_set = set(int(d) for d in real_digits)
-        common_6a = pred_6a_set & real_set
-        hit_6a = len(common_6a)
+        # Check each position - digit match
+        for i, digit in enumerate(real_digits):
+            # Check if digit appears in predictions
+            if record_data['pred_6a'] != '-':
+                if digit in record_data['pred_6a']:
+                    hit_score += 10
+            
+            if record_data['pred_2d'] != '-':
+                pred_2d_list = [d.strip() for d in record_data['pred_2d'].split(',')]
+                for p2d in pred_2d_list:
+                    if len(p2d) == 2 and p2d[0] == digit:
+                        hit_score += 5  # First digit match
+                    if len(p2d) == 2 and p2d[1] == digit:
+                        hit_score += 5  # Second digit match
         
-        # Cek 2D
-        for p2d in record_data['pred_2d']:
-            if len(p2d) == 2 and p2d.isdigit():
-                if p2d[0] in real_digits and p2d[1] in real_digits:
-                    hit_2d += 1
+        # Bonus for exact 2D match
+        if record_data['pred_2d'] != '-':
+            pred_2d_list = [d.strip() for d in record_data['pred_2d'].split(',')]
+            real_2d = record_data['angka'][2:]
+            if real_2d in pred_2d_list:
+                hit_score += 30  # Big bonus for exact 2D
+            elif real_2d[0] in [p[0] for p in pred_2d_list if len(p) == 2]:
+                hit_score += 10  # Partial match first digit
+            elif real_2d[1] in [p[1] for p in pred_2d_list if len(p) == 2]:
+                hit_score += 10  # Partial match second digit
         
-        # Hitung akurasi total
-        total_score = (hit_6a * 10) + (hit_2d * 5)
-        max_score = (len(record_data['pred_6a']) * 10) + (len(record_data['pred_2d']) * 5)
-        accuracy = (total_score / max_score * 100) if max_score > 0 else 0
-        accuracy = min(100, max(0, round(accuracy, 1)))
+        # Convert to percentage
+        accuracy = min(100, max(0, hit_score))
         
-        if hit_6a >= 3:
-            status = "✅ HIGH HIT"
-        elif hit_6a >= 1 or hit_2d >= 2:
+        # Status determination
+        if hit_score >= 50:
+            status = "✅ HIT"
+        elif hit_score >= 25:
             status = "⚠️ PARTIAL"
         else:
-            status = "❌ MISS"
+            status = "❌ TIDAK HIT"
         
         return {
-            'hit_6a': hit_6a,
-            'hit_2d': hit_2d,
+            'hit_count': hit_score,
             'accuracy': accuracy,
             'status': status
         }
     
     def save_record(self, record_data, accuracy_data):
-        """Simpan rekaman hasil"""
-        # Baca file untuk mendapatkan ID terakhir
+        """Save dengan konteks pasar"""
+        # Count existing records
         try:
             with open(self.records_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-                last_id = len(lines) - 1  # Kurangi 1 untuk header
+                id_num = len(lines) - 1  # Subtract header
         except:
-            last_id = 0
+            id_num = 0
         
-        id_num = last_id
+        if id_num < 0: 
+            id_num = 0
         
         with open(self.records_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -126,17 +229,18 @@ class AkurasiTracker:
                 record_data['pasaran'],
                 record_data['tanggal'],
                 record_data['angka'],
-                '|'.join(record_data['pred_6a']),
-                '|'.join(record_data['pred_2d']),
+                record_data['pred_6a'],
+                record_data['pred_2d'],
                 record_data['pred_shio'],
-                str(accuracy_data['hit_6a']),
-                str(accuracy_data['accuracy']) + '%',
-                accuracy_data['status']
+                accuracy_data['status'],
+                str(record_data['market_context'])[:100] if len(str(record_data['market_context'])) > 100 else str(record_data['market_context']),
+                f"{accuracy_data['accuracy']}%"
             ])
+        
         return self.records_file
     
     def show_statistics(self):
-        """Tampilkan statistik akurasi"""
+        """Show statistik lengkap dengan breakdown per pasar"""
         records = []
         
         try:
@@ -144,106 +248,82 @@ class AkurasiTracker:
                 reader = csv.DictReader(f)
                 records = [row for row in reader]
         except Exception as e:
-            print(f"{Colors.RED}❌ Error membaca database: {e}{Colors.RESET}")
+            self.cprint(f"❌ Error membaca database: {e}", self.Colors.RED)
             return
         
         if not records:
-            print(f"\n{Colors.RED}❌ Belum ada data akurasi{Colors.RESET}")
+            self.cprint("\n❌ Belum ada data akurasi", self.Colors.RED)
             return
         
         total = len(records)
-        hits = sum(1 for r in records if 'HIGH' in r['Status'])
-        partials = sum(1 for r in records if 'PARTIAL' in r['Status'])
+        hits = sum(1 for r in records if r['Status'].strip() == '✅ HIT')
+        partials = sum(1 for r in records if r['Status'].strip() == '⚠️ PARTIAL')
         misses = total - hits - partials
         
         acc_scores = []
         for r in records:
             try:
-                acc = float(r['ACC_Persen'].replace('%', ''))
-                acc_scores.append(acc)
+                if 'ACC_Persen' in r and r['ACC_Persen']:
+                    acc = float(r['ACC_Persen'].replace('%', ''))
+                    acc_scores.append(acc)
             except:
                 pass
         
         avg_acc = sum(acc_scores) / len(acc_scores) if acc_scores else 0
         
-        print("\n" + "="*50)
-        print(f"{Colors.GREEN}📊 STATISTIK AKURASI{Colors.RESET}")
-        print("="*50)
-        print(f"{Colors.WHITE}Total Prediksi      : {total}{Colors.RESET}")
-        print(f"{Colors.GREEN}✅ HIGH HIT          : {hits}/{total} ({hits/total*100:.1f}%){Colors.RESET}")
-        print(f"{Colors.YELLOW}⚠️ PARTIAL            : {partials}/{total} ({partials/total*100:.1f}%){Colors.RESET}")
-        print(f"{Colors.RED}❌ MISS               : {misses}/{total} ({misses/total*100:.1f}%){Colors.RESET}")
-        print(f"{Colors.CYAN}🎯 Average Acc        : {avg_acc:.1f}%{Colors.RESET}")
-        
-        # Per pasaran
+        # Per-market stats
         pasars = {}
         for r in records:
             p = r['Pasaran']
-            if p not in pasars:
-                pasars[p] = {'hits': 0, 'partial': 0, 'miss': 0, 'acc': []}
+            if p not in pasars: 
+                pasars[p] = {'hits': 0, 'partial': 0, 'miss': 0, 'total': 0}
             
-            if 'HIGH' in r['Status']:
+            pasars[p]['total'] += 1
+            if r['Status'].strip() == '✅ HIT': 
                 pasars[p]['hits'] += 1
-            elif 'PARTIAL' in r['Status']:
+            elif r['Status'].strip() == '⚠️ PARTIAL': 
                 pasars[p]['partial'] += 1
-            else:
+            else: 
                 pasars[p]['miss'] += 1
-            
-            try:
-                pasars[p]['acc'].append(float(r['ACC_Persen'].replace('%', '')))
-            except:
-                pass
+        
+        print("\n" + "="*50)
+        self.cprint("📊 STATISTIK AKURASI LENGKAP", self.Colors.GREEN)
+        print("="*50)
+        print(f"Total Prediksi     : {total}")
+        print(f"{self.Colors.GREEN}✅ Hit Rate         : {hits}/{total} ({hits/total*100:.1f}%){self.Colors.RESET}")
+        print(f"{self.Colors.YELLOW}⚠️ Partials          : {partials}/{total} ({partials/total*100:.1f}%){self.Colors.RESET}")
+        print(f"{self.Colors.RED}❌ Miss             : {misses}/{total} ({misses/total*100:.1f}%){self.Colors.RESET}")
+        print(f"{self.Colors.CYAN}🎯 Average Acc      : {avg_acc:.1f}%{self.Colors.RESET}")
         
         print("\n" + "-"*50)
-        print(f"{Colors.BLUE}PERFORMA PER PASARAN:{Colors.RESET}")
+        self.cprint("PERFORMA PER PASARAN:", self.Colors.BLUE)
         for p, d in sorted(pasars.items(), key=lambda x: x[1]['hits'], reverse=True)[:5]:
-            total_p = d['hits'] + d['partial'] + d['miss']
+            total_p = d['total']
             rate = d['hits']/total_p*100 if total_p > 0 else 0
-            avg = sum(d['acc'])/len(d['acc']) if d['acc'] else 0
             icon = "🔥" if rate >= 50 else "⭐" if rate >= 25 else "⚪"
-            print(f"  {icon} {p}: {d['hits']}/{total_p} ({rate:.1f}%) | Acc: {avg:.1f}%")
+            self.cprint(f"{icon} {p}: {d['hits']}/{total_p} ({rate:.1f}%)", self.Colors.WHITE)
         
-        # Top performa
-        print("\n" + "-"*50)
-        print(f"{Colors.MAGENTA}🏆 TOP 5 PREDIKSI TERAKURAT:{Colors.RESET}")
-        
-        valid_records = []
-        for r in records:
+        # Save report option
+        save = input(f"\n{self.Colors.GREEN}💾 Simpan laporan? (y/n): {self.Colors.RESET}").lower()
+        if save == 'y':
+            path = os.path.join('/sdcard/Download', f"akurasi_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
             try:
-                acc = float(r['ACC_Persen'].replace('%', ''))
-                valid_records.append((r['Pasaran'], acc, r['Status']))
-            except:
-                continue
-        
-        top_acc = sorted(valid_records, key=lambda x: x[1], reverse=True)[:5]
-        
-        for i, (pasaran, acc, status) in enumerate(top_acc, 1):
-            icon = "🔥" if acc >= 80 else "⭐" if acc >= 60 else "⚪"
-            print(f"  {i}. {icon} {pasaran} - {acc:.1f}% ({status})")
-    
-    def clear_database(self):
-        """Hapus semua data"""
-        confirm = input(f"{Colors.RED}⚠️ Yakin hapus semua data? (y/n): {Colors.RESET}").lower()
-        if confirm == 'y':
-            # Buat file baru dengan header
-            with open(self.records_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['ID', 'Pasaran', 'Tanggal', 'Real_Result', 
-                               'Predict_6A', 'Predict_2D', 'Predict_Shio',
-                               'Hit_Total', 'ACC_Persen', 'Status'])
-            print(f"{Colors.GREEN}✅ Database cleared.{Colors.RESET}")
-        else:
-            print(f"{Colors.YELLOW}⚠️ Dibatalkan.{Colors.RESET}")
-    
-    def export_csv(self):
-        """Export data ke file terpisah"""
-        export_file = os.path.join(self.db_dir, f'akurasi_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv')
-        try:
-            import shutil
-            shutil.copy2(self.records_file, export_file)
-            print(f"{Colors.GREEN}✅ Exported to: {export_file}{Colors.RESET}")
-        except Exception as e:
-            print(f"{Colors.RED}❌ Error: {e}{Colors.RESET}")
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write("="*50 + "\n")
+                    f.write("AKURASI TRACKER REPORT\n")
+                    f.write("="*50 + "\n\n")
+                    f.write(f"Total: {total}\n")
+                    f.write(f"Hits: {hits} ({hits/total*100:.1f}%)\n")
+                    f.write(f"Partials: {partials} ({partials/total*100:.1f}%)\n")
+                    f.write(f"Misses: {misses} ({misses/total*100:.1f}%)\n\n")
+                    f.write("Per Pasar:\n")
+                    for p, d in pasars.items():
+                        total_p = d['total']
+                        rate = d['hits']/total_p*100 if total_p > 0 else 0
+                        f.write(f"{p}: {d['hits']}/{total_p} ({rate:.1f}%)\n")
+                self.cprint(f"✅ Tersimpan: {path}", self.Colors.GREEN)
+            except Exception as e:
+                self.cprint(f"❌ Error menyimpan: {e}", self.Colors.RED)
 
 
 def main():
@@ -252,15 +332,15 @@ def main():
     while True:
         os.system('clear' if os.name == 'posix' else 'cls')
         print("\n" + "="*50)
-        print(f"{Colors.MAGENTA}   🎯 AKURASI TRACKER{Colors.RESET}")
+        tracker.cprint("   🎯 AKURASI TRACKER v3.0", tracker.Colors.MAGENTA + tracker.Colors.BOLD)
         print("="*50)
-        print("\n1. ✅ Input Hasil Real + Compare")
-        print("2. 📊 Lihat Statistik")
-        print("3. 🗑️ Clear Database")
-        print("4. 📤 Export CSV")
-        print("5. Exit")
+        print("\n1. Input Hasil Real + Compare")
+        print("2. Lihat Statistik")
+        print("3. Clear Database")
+        print("4. Export All")
+        print("X Exit")
         
-        choice = input(f"\n{Colors.GREEN}Pilih (1-5): {Colors.RESET}").strip()
+        choice = input(f"\n{tracker.Colors.GREEN}Pilih (1-4/X): {tracker.Colors.RESET}").strip().upper()
         
         if choice == '1':
             record_data = tracker.input_real_result()
@@ -269,43 +349,74 @@ def main():
                 tracker.save_record(record_data, accuracy_data)
                 
                 print(f"\n{'-'*50}")
-                print(f"📄 HASIL ANALISA:")
-                print(f"{Colors.CYAN}• Real Result    : {record_data['angka']}{Colors.RESET}")
-                print(f"• Hit 6 Angka    : {accuracy_data['hit_6a']} dari {len(record_data['pred_6a'])}")
-                print(f"• Hit 2D Combo   : {accuracy_data['hit_2d']} kombinasi")
-                print(f"• Akurasi Total  : {accuracy_data['accuracy']}%")
-                print(f"• Status         : {accuracy_data['status']}")
+                print(f"📄 RESULT:")
+                print(f"• Real Result   : {record_data['angka']}")
+                print(f"• Pred 6A       : {record_data['pred_6a']}")
+                print(f"• Pred 2D       : {record_data['pred_2d']}")
+                print(f"• Akurasi Total : {accuracy_data['accuracy']}%")
+                print(f"• Status        : {accuracy_data['status']}")
                 print(f"{'-'*50}")
-                print(f"{Colors.GREEN}✅ Record tersimpan di database{Colors.RESET}")
-                input("\nTekan Enter untuk lanjut...")
+                print(f"{tracker.Colors.GREEN}✅ Record tersimpan{tracker.Colors.RESET}")
+                input("\nTekan Enter lanjut...")
         
         elif choice == '2':
             tracker.show_statistics()
-            input("\nTekan Enter untuk lanjut...")
+            input("\nTekan Enter lanjut...")
         
         elif choice == '3':
-            tracker.clear_database()
-            input("\nTekan Enter untuk lanjut...")
+            confirm = input(f"{tracker.Colors.YELLOW}Hapus semua data? (y/n): {tracker.Colors.RESET}").lower()
+            if confirm == 'y':
+                # Create new file with header only
+                with open(tracker.records_file, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['ID', 'Pasaran', 'Tanggal', 'Real_Result', 
+                                   'Pred_6A', 'Pred_2D', 'Pred_Shio', 'Status', 'Market_Context', 'ACC_Persen'])
+                print(f"{tracker.Colors.GREEN}Database cleared.{tracker.Colors.RESET}")
+                input("Tekan Enter lanjut...")
         
         elif choice == '4':
-            tracker.export_csv()
-            input("\nTekan Enter untuk lanjut...")
+            records = []
+            try:
+                with open(tracker.records_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    records = list(reader)
+            except Exception as e:
+                tracker.cprint(f"Error membaca: {e}", tracker.Colors.RED)
+                records = []
+            
+            export_file = os.path.join('/sdcard/Download', f"akurasi_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+            try:
+                with open(export_file, 'w', newline='', encoding='utf-8') as f:
+                    if records:
+                        writer = csv.DictWriter(f, fieldnames=['ID','Pasaran','Tanggal','Real_Result','Pred_6A','Pred_2D','Status','ACC_Persen'])
+                        writer.writeheader()
+                        # Write only selected fields
+                        for r in records:
+                            writer.writerow({
+                                'ID': r.get('ID', ''),
+                                'Pasaran': r.get('Pasaran', ''),
+                                'Tanggal': r.get('Tanggal', ''),
+                                'Real_Result': r.get('Real_Result', ''),
+                                'Pred_6A': r.get('Pred_6A', ''),
+                                'Pred_2D': r.get('Pred_2D', ''),
+                                'Status': r.get('Status', ''),
+                                'ACC_Persen': r.get('ACC_Persen', '')
+                            })
+                tracker.cprint(f"✅ Exported: {export_file}", tracker.Colors.GREEN)
+            except Exception as e:
+                tracker.cprint(f"❌ Error export: {e}", tracker.Colors.RED)
+            input("Tekan Enter lanjut...")
         
-        elif choice == '5':
-            print(f"\n{Colors.YELLOW}👋 Sampai jumpa!{Colors.RESET}")
+        elif choice == 'X':
             break
-        
-        else:
-            print(f"{Colors.RED}❌ Pilihan tidak valid!{Colors.RESET}")
-            input("\nTekan Enter untuk lanjut...")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print(f"\n\n{Colors.YELLOW}⚠️ Dibatalkan.{Colors.RESET}")
+        print(f"\n\n{AkurasiTracker.Colors.YELLOW}⚠️ Dibatalkan.{AkurasiTracker.Colors.RESET}")
     except Exception as e:
-        print(f"{Colors.RED}❌ Error: {e}{Colors.RESET}")
+        print(f"{AkurasiTracker.Colors.RED}❌ Error: {e}{AkurasiTracker.Colors.RESET}")
         import traceback
         traceback.print_exc()
