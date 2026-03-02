@@ -1,364 +1,298 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-📅 HISTORY ANALYZER
-Analisis pola dari semua prediksi + hasil real
+📅 HISTORY ANALYZER v3.0 - DUOPLEX EDITION (FIXED)
+Dual Analysis: GitHub Market History + Your Personal Accuracy Tracking
 """
 
 import os
 import csv
+import requests
+import re
 from datetime import datetime
 from collections import Counter, defaultdict
 
-# ========== WARNA ANSI ==========
-class Colors:
-    RESET = '\033[0m'
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
+# ========== KONFIGURASI GITHUB ==========
+GITHUB_CONFIG = {
+    'username': 'MOMODIGITAL',
+    'repo': 'data-vault',
+    'branch': 'main',
+    'path': 'data'
+}
+
+MARKET_FILES = {
+    1: ('magnum-cambodia', 'magnum-cambodia.csv'),
+    2: ('sydney-pools', 'sydney-pools.csv'),
+    3: ('sydney-lotto', 'sydney-lotto.csv'),
+    4: ('china-pools', 'china-pools.csv'),
+    5: ('singapore', 'singapore.csv'),
+    6: ('taiwan', 'taiwan.csv'),
+    7: ('hongkong-pools', 'hongkong-pools.csv'),
+    8: ('hongkong-lotto', 'hongkong-lotto.csv'),
+    9: ('newyork-evening', 'newyork-evening.csv'),
+    10: ('kentucky-evening', 'kentucky-evening.csv')
+}
+
+MARKET_NAMES = {
+    1: 'Magnum Cambodia', 2: 'Sydney Pools', 3: 'Sydney Lotto',
+    4: 'China Pools', 5: 'Singapore', 6: 'Taiwan',
+    7: 'Hongkong Pools', 8: 'Hongkong Lotto', 9: 'New York Evening', 10: 'Kentucky Evening'
+}
 
 class HistoryAnalyzer:
     def __init__(self):
         self.db_dir = '/sdcard/Prediktor_Akurasi_DB'
         self.db_dir_2 = '/sdcard/Prediktor_History'
+        self.export_dir = '/sdcard/Download/History_Reports'
         
-        # Buat direktori jika belum ada
-        if not os.path.exists(self.db_dir):
-            os.makedirs(self.db_dir)
-        if not os.path.exists(self.db_dir_2):
-            os.makedirs(self.db_dir_2)
-            
-        self.records_file = os.path.join(self.db_dir, 'records.csv')
-        self.history_file = os.path.join(self.db_dir_2, 'prediction_history.txt')
+        # Create directories
+        for directory in [self.db_dir, self.db_dir_2, self.export_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
     
-    def load_records(self):
-        """Load all records from akurasi tracker"""
-        if not os.path.exists(self.records_file):
-            print(f"{Colors.YELLOW}⚠️ File records.csv belum ada. Jalankan Akurasi Tracker dulu.{Colors.RESET}")
+    class Colors:
+        RESET = '\033[0m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        BLUE = '\033[94m'
+        CYAN = '\033[96m'
+        WHITE = '\033[97m'
+        MAGENTA = '\033[95m'
+        RED = '\033[91m'
+        BOLD = '\033[1m'
+    
+    @staticmethod
+    def cprint(text, color=None, end='\n'):
+        try:
+            if color:
+                formatted = f"{color}{text}{HistoryAnalyzer.Colors.RESET}"
+            else:
+                formatted = str(text)
+            print(formatted, end=end)
+        except Exception:
+            print(str(text), end=end)
+    
+    # ========== FUNGSI GITHUB INTEGRATION ==========
+    def fetch_github_csv(self, market_key):
+        file_info = MARKET_FILES.get(market_key)
+        if not file_info:
+            return None
+        
+        url = f"https://raw.githubusercontent.com/{GITHUB_CONFIG['username']}/{GITHUB_CONFIG['repo']}/{GITHUB_CONFIG['branch']}/{GITHUB_CONFIG['path']}/{file_info[1]}"
+        
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            return r.text
+        except Exception as e:
+            self.cprint(f"❌ Error GitHub: {e}", self.Colors.RED)
+            return None
+    
+    def parse_csv_data(self, text):
+        if not text:
+            return []
+        results = []
+        lines = text.strip().split('\n')[1:]
+        for line in lines:
+            if not line: continue
+            parts = line.split(',')
+            if len(parts) >= 2:
+                match = re.search(r'\d{4}', parts[1].strip())
+                if match and len(match.group()) == 4:
+                    results.append(match.group())
+        return results
+    
+    def analyze_market_history(self, market_key):
+        """Analyze historical patterns from GitHub CSV"""
+        m_name = MARKET_NAMES.get(market_key, f"Market {market_key}")
+        
+        self.cprint(f"\n{'='*50}", self.Colors.CYAN)
+        self.cprint(f"[{market_key}/10] Mengambil Data {m_name}...", self.Colors.BLUE)
+        self.cprint('='*50, self.Colors.CYAN)
+        
+        csv_text = self.fetch_github_csv(market_key)
+        if not csv_text:
+            return None
+        
+        data = self.parse_csv_data(csv_text)
+        
+        if len(data) < 50:
+            self.cprint(f"⚠️ Data kurang ({len(data)}). Minimum 50 putaran.", self.Colors.YELLOW)
+            return None
+        
+        self.cprint(f"✅ Analisa {len(data)} riwayat pasar...", self.Colors.GREEN)
+        
+        # Analyze digit frequency
+        all_digits = [d for num in data for d in num]
+        digit_freq = Counter(all_digits).most_common(10)
+        
+        # Odd/Even ratio
+        odd_count = sum(1 for d in all_digits if int(d) % 2 == 1)
+        even_count = len(all_digits) - odd_count
+        odd_rate = odd_count / len(all_digits) * 100 if len(all_digits) > 0 else 0
+        
+        # Hot/Cold digits
+        hot = digit_freq[:5]
+        cold = digit_freq[-5:] if len(digit_freq) >= 5 else digit_freq
+        
+        # Last digit frequency
+        last_digits = [int(d[-1]) for d in data if len(d) == 4]
+        last_digit_freq = Counter(last_digits).most_common(5)
+        
+        return {
+            'name': m_name,
+            'count': len(data),
+            'digit_freq': dict(digit_freq),
+            'hot_digits': hot,
+            'cold_digits': cold,
+            'odd': {'count': odd_count, 'even': even_count, 'rate': odd_rate},
+            'odd_rate': odd_rate,
+            'even': even_count,
+            'last_digit': last_digit_freq
+        }
+    
+    # ========== FUNGSI PERSONAL ACCURACY ==========
+    def load_personal_records(self):
+        records_file = os.path.join(self.db_dir, 'records.csv')
+        if not os.path.exists(records_file):
             return []
         
         records = []
         try:
-            with open(self.records_file, 'r', encoding='utf-8') as f:
+            with open(records_file, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                for row in reader:
-                    # Bersihkan data
-                    cleaned_row = {}
-                    for key, value in row.items():
-                        cleaned_row[key.strip()] = value.strip() if value else ''
-                    records.append(cleaned_row)
+                records = [row for row in reader]
         except Exception as e:
-            print(f"{Colors.RED}❌ Error membaca records: {e}{Colors.RESET}")
-            return []
-        
+            self.cprint(f"Error membaca records: {e}", self.Colors.RED)
         return records
     
-    def analyze_digit_frequency(self, records):
-        """Analyze which digits appear most frequently"""
-        all_hits = []
-        for r in records:
-            if r.get('Real_Result'):
-                for digit in r['Real_Result']:
-                    if digit.isdigit():
-                        all_hits.append(digit)
-        
-        freq = Counter(all_hits)
-        return freq.most_common(10)
-    
-    def analyze_position_frequency(self, records):
-        """Analyze digit frequency by position (AS, KOP, KEPALA, EKOR)"""
-        positions = {'AS': [], 'KOP': [], 'KEPALA': [], 'EKOR': []}
-        
-        for r in records:
-            if r.get('Real_Result') and len(r['Real_Result']) == 4:
-                digits = r['Real_Result']
-                positions['AS'].append(digits[0])
-                positions['KOP'].append(digits[1])
-                positions['KEPALA'].append(digits[2])
-                positions['EKOR'].append(digits[3])
-        
-        result = {}
-        for pos, digits in positions.items():
-            if digits:
-                result[pos] = Counter(digits).most_common(5)
-            else:
-                result[pos] = []
-        
-        return result
-    
-    def analyze_weekday_performance(self, records):
-        """Analyze performance per weekday"""
-        weekday_perfs = defaultdict(lambda: {'total': 0, 'hits': 0, 'partial': 0})
-        
-        for r in records:
-            if r.get('Tanggal'):
-                try:
-                    date = datetime.strptime(r['Tanggal'], '%d/%m/%Y')
-                    weekday = date.strftime('%A')
-                    weekday_perfs[weekday]['total'] += 1
-                    
-                    status = r.get('Status', '').strip()
-                    if 'HIGH HIT' in status:
-                        weekday_perfs[weekday]['hits'] += 1
-                    elif 'PARTIAL' in status:
-                        weekday_perfs[weekday]['partial'] += 1
-                except Exception as e:
-                    # Skip jika format tanggal salah
-                    continue
-        
-        return dict(weekday_perfs)
-    
-    def analyze_time_periods(self, records):
-        """Analyze performance by time period"""
-        period_perf = defaultdict(lambda: {'total': 0, 'hits': 0, 'partial': 0})
-        
-        for r in records:
-            if r.get('Tanggal'):
-                try:
-                    date = datetime.strptime(r['Tanggal'], '%d/%m/%Y')
-                    
-                    if date.weekday() < 5:  # Weekday
-                        period = 'Weekday (Senin-Jumat)'
-                    else:
-                        period = 'Weekend (Sabtu-Minggu)'
-                    
-                    period_perf[period]['total'] += 1
-                    
-                    status = r.get('Status', '').strip()
-                    if 'HIGH HIT' in status:
-                        period_perf[period]['hits'] += 1
-                    elif 'PARTIAL' in status:
-                        period_perf[period]['partial'] += 1
-                except:
-                    pass
-        
-        return dict(period_perf)
-    
-    def analyze_monthly_trend(self, records):
-        """Analyze monthly performance trends"""
-        monthly = defaultdict(lambda: {'total': 0, 'hits': 0})
-        
-        for r in records:
-            if r.get('Tanggal'):
-                try:
-                    date = datetime.strptime(r['Tanggal'], '%d/%m/%Y')
-                    month_key = date.strftime('%B %Y')
-                    
-                    monthly[month_key]['total'] += 1
-                    
-                    status = r.get('Status', '').strip()
-                    if 'HIGH HIT' in status:
-                        monthly[month_key]['hits'] += 1
-                except:
-                    pass
-        
-        return dict(monthly)
-    
-    def get_top_pasaran(self, records):
-        """Get top performing markets"""
-        pasaran_stats = defaultdict(lambda: {'total': 0, 'hits': 0, 'acc_total': 0})
-        
-        for r in records:
-            pasaran = r.get('Pasaran', 'Unknown')
-            pasaran_stats[pasaran]['total'] += 1
-            
-            status = r.get('Status', '').strip()
-            if 'HIGH HIT' in status:
-                pasaran_stats[pasaran]['hits'] += 1
-            
-            try:
-                acc = float(r.get('ACC_Persen', '0').replace('%', ''))
-                pasaran_stats[pasaran]['acc_total'] += acc
-            except:
-                pasaran_stats[pasaran]['acc_total'] += 0
-        
-        # Hitung rata-rata akurasi
-        result = []
-        for pasaran, stats in pasaran_stats.items():
-            if stats['total'] > 0:
-                avg_acc = stats['acc_total'] / stats['total']
-                hit_rate = (stats['hits'] / stats['total'] * 100) if stats['total'] > 0 else 0
-                result.append({
-                    'pasaran': pasaran,
-                    'total': stats['total'],
-                    'hits': stats['hits'],
-                    'hit_rate': hit_rate,
-                    'avg_acc': avg_acc
-                })
-        
-        return sorted(result, key=lambda x: x['hit_rate'], reverse=True)
-    
-    def show_analysis(self):
-        """Show complete analysis"""
-        records = self.load_records()
-        
-        if not records:
-            print(f"{Colors.RED}❌ Tidak ada data untuk dianalisis{Colors.RESET}")
-            return
-        
-        print("\n" + "="*50)
-        print(f"{Colors.MAGENTA}📅 HISTORY ANALYZER - COMPLETE REPORT{Colors.RESET}")
-        print("="*50)
-        
-        # Overall Stats
+    def calculate_accuracy_stats(self, records):
         total = len(records)
-        hits = sum(1 for r in records if 'HIGH HIT' in r.get('Status', ''))
-        partials = sum(1 for r in records if 'PARTIAL' in r.get('Status', ''))
-        misses = total - hits - partials
+        hits = sum(1 for r in records if r.get('Status', '').strip() == '✅ HIT')
+        partials = sum(1 for r in records if r.get('Status', '').strip() == '⚠️ PARTIAL')
         
-        hit_rate = (hits / total * 100) if total > 0 else 0
-        
-        print(f"\n{Colors.WHITE}Total Data       : {total}{Colors.RESET}")
-        print(f"{Colors.GREEN}HIGH HIT          : {hits} ({hit_rate:.1f}%){Colors.RESET}")
-        print(f"{Colors.YELLOW}PARTIAL           : {partials}{Colors.RESET}")
-        print(f"{Colors.RED}MISS              : {misses}{Colors.RESET}")
-        
-        # Digit Frequency by Position
-        print("\n" + "-"*50)
-        print(f"{Colors.CYAN}🔢 FREKUENSI DIGIT PER POSISI:{Colors.RESET}")
-        pos_freq = self.analyze_position_frequency(records)
-        
-        for pos, digits in pos_freq.items():
-            print(f"\n{Colors.YELLOW}{pos}:{Colors.RESET}")
-            for digit, count in digits[:3]:
-                bar_len = int(count / digits[0][1] * 30) if digits else 0
-                bar = "█" * bar_len
-                print(f"  Digit {digit}: {count}x [{bar}]")
-        
-        # Overall Digit Frequency
-        print("\n" + "-"*50)
-        print(f"{Colors.CYAN}🔢 FREKUENSI DIGIT KESELURUHAN:{Colors.RESET}")
-        digit_freq = self.analyze_digit_frequency(records)
-        
-        if digit_freq:
-            max_count = digit_freq[0][1]
-            for digit, count in digit_freq:
-                bar_len = int(count / max_count * 40)
-                bar = "█" * bar_len
-                print(f"Digit {digit}: {count}x [{bar}]")
-        
-        # Top Pasaran
-        print("\n" + "-"*50)
-        print(f"{Colors.GREEN}🏆 TOP 5 PASARAN TERBAIK:{Colors.RESET}")
-        top_pasaran = self.get_top_pasaran(records)[:5]
-        
-        for i, p in enumerate(top_pasaran, 1):
-            icon = "🔥" if p['hit_rate'] >= 50 else "⭐" if p['hit_rate'] >= 30 else "⚪"
-            print(f"{i}. {icon} {p['pasaran']}: {p['hits']}/{p['total']} ({p['hit_rate']:.1f}%) | Acc: {p['avg_acc']:.1f}%")
-        
-        # Weekday Performance
-        print("\n" + "-"*50)
-        print(f"{Colors.BLUE}📅 KINERJA PER HARI:{Colors.RESET}")
-        weekday_perf = self.analyze_weekday_performance(records)
-        
-        # Urutkan berdasarkan hari
-        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        day_names = {
-            'Monday': 'Senin', 'Tuesday': 'Selasa', 'Wednesday': 'Rabu',
-            'Thursday': 'Kamis', 'Friday': 'Jumat', 'Saturday': 'Sabtu', 'Sunday': 'Minggu'
+        return {
+            'total': total,
+            'hits': hits,
+            'partials': partials,
+            'misses': total - hits - partials,
+            'hit_rate': (hits / total * 100) if total > 0 else 0
         }
-        
-        for day in day_order:
-            if day in weekday_perf:
-                perf = weekday_perf[day]
-                rate = perf['hits']/perf['total']*100 if perf['total'] > 0 else 0
-                icon = "🔥" if rate >= 50 else "⭐" if rate >= 30 else "⚪"
-                print(f"{icon} {day_names[day]}: {perf['hits']}/{perf['total']} ({rate:.1f}%)")
-        
-        # Time Period
-        print("\n" + "-"*50)
-        print(f"{Colors.YELLOW}⏰ KINERJA PER MASA:{Colors.RESET}")
-        period_perf = self.analyze_time_periods(records)
-        
-        for period, perf in period_perf.items():
-            rate = perf['hits']/perf['total']*100 if perf['total'] > 0 else 0
-            icon = "🔥" if rate >= 50 else "⭐" if rate >= 30 else "⚪"
-            print(f"{icon} {period}: {perf['hits']}/{perf['total']} ({rate:.1f}%)")
-        
-        # Monthly Trend
-        print("\n" + "-"*50)
-        print(f"{Colors.MAGENTA}📈 TREN BULANAN:{Colors.RESET}")
-        monthly = self.analyze_monthly_trend(records)
-        
-        # Ambil 3 bulan terakhir
-        recent_months = sorted(monthly.keys())[-3:]
-        for month in recent_months:
-            if month in monthly:
-                m = monthly[month]
-                rate = m['hits']/m['total']*100 if m['total'] > 0 else 0
-                trend = "📈" if rate >= 40 else "📉" if rate < 30 else "➡️"
-                print(f"{trend} {month}: {m['hits']}/{m['total']} ({rate:.1f}%)")
-        
-        # Rekomendasi
-        print("\n" + "="*50)
-        print(f"{Colors.GREEN}📋 REKOMENDASI BERDASARKAN DATA:{Colors.RESET}")
-        print("-"*50)
-        
-        # Best days
-        best_days = []
-        for day in day_order:
-            if day in weekday_perf and weekday_perf[day]['total'] >= 2:
-                rate = weekday_perf[day]['hits']/weekday_perf[day]['total']*100
-                best_days.append((day_names[day], rate))
-        
-        best_days = sorted(best_days, key=lambda x: x[1], reverse=True)[:3]
-        if best_days:
-            print(f"{Colors.GREEN}✅ Hari Terbaik: {', '.join([d[0] for d in best_days])}{Colors.RESET}")
-        
-        # Hot digits
-        if digit_freq:
-            hot_digits = [d[0] for d in digit_freq[:3]]
-            print(f"{Colors.CYAN}🔥 Digit Terpanas: {', '.join(hot_digits)}{Colors.RESET}")
-        
-        # Best market
-        if top_pasaran:
-            best_market = top_pasaran[0]
-            print(f"{Colors.YELLOW}🎯 Pasaran Terbaik: {best_market['pasaran']} ({best_market['hit_rate']:.1f}%){Colors.RESET}")
-        
-        # Save to file
-        save = input(f"\n{Colors.GREEN}💾 Simpan laporan ke file? (y/n): {Colors.RESET}").lower()
-        if save == 'y':
-            self.save_report(records, digit_freq, weekday_perf, period_perf, top_pasaran)
     
-    def save_report(self, records, digit_freq, weekday_perf, period_perf, top_pasaran):
-        """Save analysis report to file"""
-        fname = f"history_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        path = os.path.join(self.db_dir_2, fname)
+    # ========== DISPLAY FUNCTION ==========
+    def display_comprehensive_report(self, github_analyses, personal_stats):
+        """Display complete dual analysis report"""
+        
+        print("\n" + "="*60)
+        self.cprint("📊 REPORT LENGKAP - MARKET + PERSONAL", self.Colors.MAGENTA + self.Colors.BOLD)
+        print("="*60)
+        
+        # ===== PERSONAL STATS =====
+        print("\n" + "-"*60)
+        self.cprint("👤 AKURASI PRIBADI ANDA", self.Colors.GREEN)
+        print("-"*60)
+        self.cprint(f"Total Prediksi : {personal_stats['total']} x", self.Colors.WHITE)
+        self.cprint(f"✅ Hit          : {personal_stats['hits']} ({personal_stats['hit_rate']:.1f}%)", self.Colors.GREEN)
+        self.cprint(f"⚠️ Partial      : {personal_stats['partials']} x", self.Colors.YELLOW)
+        self.cprint(f"❌ Miss         : {personal_stats['misses']} x", self.Colors.RED)
+        
+        # ===== MARKET ANALYSIS SUMMARY =====
+        print("\n" + "-"*60)
+        self.cprint("📈 HISTORI PASARAN (Dari GitHub)", self.Colors.CYAN)
+        print("-"*60)
+        
+        if github_analyses:
+            valid_analyses = [a for a in github_analyses.values() if a]
+            for i, analysis in enumerate(valid_analyses, 1):
+                self.cprint(f"\n[{i}] {analysis['name']} ({analysis['count']} putaran)", self.Colors.BLUE)
+                
+                # Hot/Cold digits
+                hot_str = ', '.join([str(t[0]) for t in analysis['hot_digits']])
+                cold_str = ', '.join([str(c[0]) for c in analysis['cold_digits']])
+                
+                self.cprint(f"   🔥 Hot Digits : {hot_str}", self.Colors.GREEN)
+                self.cprint(f"   ❄️ Cold Digits: {cold_str}", self.Colors.YELLOW)
+                
+                # Odd/Even rate
+                self.cprint(f"   G/E Ratio     : {analysis['odd']['count']}:{analysis['even']} ({analysis['odd_rate']:.1f}%)", self.Colors.WHITE)
+                
+                # Last digit trend
+                self.cprint(f"   👉 Terakhir   : ", end="")
+                items = ', '.join([f"{d}({c})" for d, c in analysis['last_digit'][:3]])
+                self.cprint(items, self.Colors.CYAN)
+        else:
+            self.cprint("Tidak ada data pasar berhasil diunduh", self.Colors.RED)
+        
+        # ===== COMPARISON & INSIGHTS =====
+        print("\n" + "="*60)
+        self.cprint("💡 INSIGHT & REKOMENDASI", self.Colors.MAGENTA + self.Colors.BOLD)
+        print("="*60)
+        
+        # Overall assessment
+        self.cprint(f"\n🎯 Performance Summary:", self.Colors.CYAN)
+        if personal_stats['hit_rate'] >= 60:
+            self.cprint("• Skill Anda TINGGI! Pertahankan!", self.Colors.GREEN)
+        elif personal_stats['hit_rate'] >= 40:
+            self.cprint("• Cukup baik, tingkatkan lagi!", self.Colors.YELLOW)
+        else:
+            self.cprint("• Perlu evaluasi strategi prediksi!", self.Colors.RED)
+        
+        # Top performing market
+        if github_analyses:
+            valid_with_data = [(k, v) for k, v in github_analyses.items() if v]
+            top_markets = sorted(valid_with_data, 
+                              key=lambda x: x[1]['count'] if x[1] else 0, 
+                              reverse=True)[:3]
+            
+            self.cprint("\n🏆 3 Pasar dengan Data Terlengkap:", self.Colors.CYAN)
+            for idx, (key, val) in enumerate(top_markets, 1):
+                if val:
+                    self.cprint(f"  {idx}. {val['name']} ({val['count']} putaran)", self.Colors.WHITE)
+        
+        # Hot digits recommendation
+        all_hot = {}
+        if github_analyses:
+            for market, analysis in github_analyses.items():
+                if analysis:
+                    for digit, count in analysis['hot_digits']:
+                        all_hot[digit] = all_hot.get(digit, 0) + count
+            
+            if all_hot:
+                sorted_hot = sorted(all_hot.items(), key=lambda x: x[1], reverse=True)[:5]
+                self.cprint("\n🔥 Digit Paling Sering Muncul Across Markets:", self.Colors.MAGENTA)
+                for digit, count in sorted_hot:
+                    self.cprint(f"  • {digit}: muncul di {count} pasar panas", self.Colors.YELLOW)
+    
+    # ========== SAVE REPORT ==========
+    def save_full_report(self, filename, data, personal):
+        path = os.path.join(self.export_dir, filename)
         
         try:
             with open(path, 'w', encoding='utf-8') as f:
-                f.write("="*50 + "\n")
-                f.write("📅 HISTORY ANALYZER - LAPORAN LENGKAP\n")
-                f.write("="*50 + "\n\n")
-                f.write(f"Tanggal Report: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
-                f.write(f"Total Data     : {len(records)}\n\n")
+                f.write("="*60 + "\n")
+                f.write("📊 LAPORAN LENGKAP - MARKET HISTORY + PERSONAL\n")
+                f.write("="*60 + "\n\n")
+                f.write(f"Generated: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n")
                 
-                f.write("FREKUENSI DIGIT:\n")
-                for digit, count in digit_freq:
-                    f.write(f"  Digit {digit}: {count}x\n")
+                f.write("PERSONAL ACCURACY:\n")
+                f.write(f"  Total Predictions: {personal['total']}\n")
+                f.write(f"  Hits: {personal['hits']} ({personal['hit_rate']:.1f}%)\n")
+                f.write(f"  Partials: {personal['partials']}\n")
+                f.write(f"  Misses: {personal['misses']}\n\n")
                 
-                f.write("\nKINERJA PER HARI:\n")
-                day_names = {
-                    'Monday': 'Senin', 'Tuesday': 'Selasa', 'Wednesday': 'Rabu',
-                    'Thursday': 'Kamis', 'Friday': 'Jumat', 'Saturday': 'Sabtu', 'Sunday': 'Minggu'
-                }
-                for day, id_day in day_names.items():
-                    if day in weekday_perf:
-                        perf = weekday_perf[day]
-                        rate = perf['hits']/perf['total']*100 if perf['total'] > 0 else 0
-                        f.write(f"  {id_day}: {perf['hits']}/{perf['total']} ({rate:.1f}%)\n")
+                f.write("MARKET HISTORY (GitHub):\n")
+                for market, analysis in data.items():
+                    if analysis:
+                        f.write(f"\n  [{market}] {analysis['name']}:\n")
+                        f.write(f"    Data Count: {analysis['count']}\n")
+                        f.write(f"    Hot Digits: {[t[0] for t in analysis['hot_digits']]}\n")
+                        f.write(f"    Cold Digits: {[c[0] for c in analysis['cold_digits']]}\n")
                 
-                f.write("\nTOP PASARAN:\n")
-                for p in top_pasaran[:5]:
-                    f.write(f"  {p['pasaran']}: {p['hits']}/{p['total']} ({p['hit_rate']:.1f}%) - Acc: {p['avg_acc']:.1f}%\n")
-            
-            print(f"\n{Colors.GREEN}✅ Laporan tersimpan: {path}{Colors.RESET}")
+                f.write("\n" + "="*60 + "\n")
+            return path
         except Exception as e:
-            print(f"{Colors.RED}❌ Gagal menyimpan laporan: {e}{Colors.RESET}")
+            self.cprint(f"Error menyimpan file: {e}", self.Colors.RED)
+            return None
 
 
 def main():
@@ -366,106 +300,112 @@ def main():
     
     while True:
         os.system('clear' if os.name == 'posix' else 'cls')
-        print("\n" + "="*50)
-        print(f"{Colors.MAGENTA}📅 HISTORY ANALYZER{Colors.RESET}")
-        print("="*50)
-        print("\n1. 📊 Analisis Lengkap")
-        print("2. 🔢 Pola Digit per Posisi")
-        print("3. 📅 Performa Harian")
-        print("4. 🏆 Top Pasaran")
-        print("5. 📤 Export Laporan")
-        print("6. Exit")
+        print("\n" + "="*60)
+        analyzer.cprint("📅 HISTORY ANALYZER v3.0 - DUOPLEX EDITION", analyzer.Colors.MAGENTA + analyzer.Colors.BOLD)
+        print("="*60)
         
-        choice = input(f"\n{Colors.GREEN}Pilih (1-6): {Colors.RESET}").strip()
+        print("\n1️⃣ Lihat Akurasi Personal (Local DB)")
+        print("2️⃣ Ambil Data Pasar (GitHub - Single)")
+        print("3️⃣ Semua Pasar Otomatis (GitHub - All 10)")
+        print("4️⃣ Report Lengkap (Both)")
+        print("X Exit")
         
-        if choice == '1':
-            analyzer.show_analysis()
+        choice = input(f"\n{analyzer.Colors.GREEN}Pilih (1-4/X): {analyzer.Colors.RESET}").strip().upper()
+        
+        if choice == 'X':
+            analyzer.cprint("\n✅ Keluar. Sampai jumpa!", analyzer.Colors.WHITE)
+            break
+        
+        elif choice == '1':
+            # Show personal stats only
+            records = analyzer.load_personal_records()
+            stats = analyzer.calculate_accuracy_stats(records)
+            
+            print("\n" + "-"*60)
+            analyzer.cprint("👤 AKURASI PRIBADI ANDA", analyzer.Colors.GREEN)
+            print("-"*60)
+            analyzer.cprint(f"Total Prediksi : {stats['total']} x", analyzer.Colors.WHITE)
+            analyzer.cprint(f"✅ Hit          : {stats['hits']} ({stats['hit_rate']:.1f}%)", analyzer.Colors.GREEN)
+            analyzer.cprint(f"⚠️ Partial      : {stats['partials']} x", analyzer.Colors.YELLOW)
+            analyzer.cprint(f"❌ Miss         : {stats['misses']} x", analyzer.Colors.RED)
+            
             input("\nTekan Enter untuk lanjut...")
         
         elif choice == '2':
-            records = analyzer.load_records()
-            if records:
-                pos_freq = analyzer.analyze_position_frequency(records)
+            # Manual select one market
+            print("\nPilih Pasar:")
+            for k, v in MARKET_NAMES.items():
+                analyzer.cprint(f"{k}. {v}", analyzer.Colors.WHITE)
+            
+            try:
+                sel = int(input(analyzer.Colors.GREEN + "➤ Pilihan (1-10): " + analyzer.Colors.RESET))
+                analysis = analyzer.analyze_market_history(sel)
                 
-                print("\n" + "="*50)
-                print(f"{Colors.CYAN}🔢 POLA DIGIT PER POSISI{Colors.RESET}")
-                print("="*50)
-                
-                for pos, digits in pos_freq.items():
-                    print(f"\n{Colors.YELLOW}{pos}:{Colors.RESET}")
-                    if digits:
-                        max_count = digits[0][1]
-                        for digit, count in digits:
-                            bar_len = int(count / max_count * 30)
-                            bar = "█" * bar_len
-                            print(f"  Digit {digit}: {count}x [{bar}]")
-                    else:
-                        print("  Belum ada data")
-            else:
-                print(f"{Colors.RED}❌ Tidak ada data{Colors.RESET}")
+                if analysis:
+                    print("\nHot Digits:", [str(t[0]) for t in analysis['hot_digits']])
+                    print("Cold Digits:", [str(c[0]) for c in analysis['cold_digits']])
+                    
+                    save = input(analyzer.Colors.GREEN + "\nSimpan laporan? (y/n): " + analyzer.Colors.RESET).lower()
+                    if save == 'y':
+                        path = os.path.join(analyzer.export_dir, f"market_{sel}_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt")
+                        with open(path, 'w') as f:
+                            f.write(f"Pasar: {analysis['name']}\n")
+                            f.write(f"Data: {analysis['count']} putaran\n")
+                            f.write(f"Hot: {[t[0] for t in analysis['hot_digits']]}\n")
+                            f.write(f"Cold: {[c[0] for c in analysis['cold_digits']]}\n")
+                        
+                        analyzer.cprint(f"✅ Tersimpan di: {path}", analyzer.Colors.GREEN)
+            except ValueError:
+                analyzer.cprint("❌ Input tidak valid", analyzer.Colors.RED)
+            
             input("\nTekan Enter untuk lanjut...")
         
         elif choice == '3':
-            records = analyzer.load_records()
-            if records:
-                weekday_perf = analyzer.analyze_weekday_performance(records)
-                period_perf = analyzer.analyze_time_periods(records)
+            # Auto process all 10 markets
+            analyzer.cprint("\n▶️ FULL AUTO - ALL MARKETS FROM GITHUB", analyzer.Colors.CYAN)
+            
+            analyses = {}
+            for m_choice in MARKET_FILES.keys():
+                analysis = analyzer.analyze_market_history(m_choice)
+                if analysis:
+                    analyses[m_choice] = analysis
                 
-                print("\n" + "="*50)
-                print(f"{Colors.BLUE}📅 KINERJA PER WAKTU{Colors.RESET}")
-                print("="*50)
-                
-                print(f"\n{Colors.YELLOW}Per Hari:{Colors.RESET}")
-                day_names = {
-                    'Monday': 'Senin', 'Tuesday': 'Selasa', 'Wednesday': 'Rabu',
-                    'Thursday': 'Kamis', 'Friday': 'Jumat', 'Saturday': 'Sabtu', 'Sunday': 'Minggu'
-                }
-                day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                
-                for day in day_order:
-                    if day in weekday_perf:
-                        perf = weekday_perf[day]
-                        rate = perf['hits']/perf['total']*100 if perf['total'] > 0 else 0
-                        icon = "🔥" if rate >= 50 else "⭐" if rate >= 30 else "⚪"
-                        print(f"  {icon} {day_names[day]}: {perf['hits']}/{perf['total']} ({rate:.1f}%)")
-                
-                print(f"\n{Colors.YELLOW}Per Periode:{Colors.RESET}")
-                for period, perf in period_perf.items():
-                    rate = perf['hits']/perf['total']*100 if perf['total'] > 0 else 0
-                    icon = "🔥" if rate >= 50 else "⭐" if rate >= 30 else "⚪"
-                    print(f"  {icon} {period}: {perf['hits']}/{perf['total']} ({rate:.1f}%)")
-            else:
-                print(f"{Colors.RED}❌ Tidak ada data{Colors.RESET}")
-            input("\nTekan Enter untuk lanjut...")
+                if m_choice < max(MARKET_FILES.keys()):
+                    cont = input(analyzer.Colors.CYAN + "\nLanjut? (Enter) / N exit: " + analyzer.Colors.RESET).lower()
+                    if cont == 'n':
+                        break
+            
+            analyzer.cprint("\n✅ Semua pasar selesai di-analisa!", analyzer.Colors.GREEN)
+            input("Tekan Enter untuk lanjut...")
         
         elif choice == '4':
-            records = analyzer.load_records()
-            if records:
-                top_pasaran = analyzer.get_top_pasaran(records)
-                
-                print("\n" + "="*50)
-                print(f"{Colors.GREEN}🏆 TOP PASARAN{Colors.RESET}")
-                print("="*50)
-                
-                for i, p in enumerate(top_pasaran, 1):
-                    icon = "🔥" if p['hit_rate'] >= 50 else "⭐" if p['hit_rate'] >= 30 else "⚪"
-                    print(f"{i}. {icon} {p['pasaran']}")
-                    print(f"   • Hit Rate: {p['hits']}/{p['total']} ({p['hit_rate']:.1f}%)")
-                    print(f"   • Avg Acc : {p['avg_acc']:.1f}%")
-            else:
-                print(f"{Colors.RED}❌ Tidak ada data{Colors.RESET}")
-            input("\nTekan Enter untuk lanjut...")
-        
-        elif choice == '5':
-            analyzer.show_analysis()
-            input("\nTekan Enter untuk lanjut...")
-        
-        elif choice == '6':
-            print(f"\n{Colors.YELLOW}👋 Sampai jumpa!{Colors.RESET}")
-            break
-        
-        else:
-            print(f"{Colors.RED}❌ Pilihan tidak valid!{Colors.RESET}")
+            # Complete report
+            # First get market analysis
+            analyses = {}
+            analyzer.cprint("\nMengambil data pasar dari GitHub...", analyzer.Colors.CYAN)
+            
+            for m_choice in MARKET_FILES.keys():
+                analysis = analyzer.analyze_market_history(m_choice)
+                if analysis:
+                    analyses[m_choice] = analysis
+            
+            # Then get personal stats
+            records = analyzer.load_personal_records()
+            personal = analyzer.calculate_accuracy_stats(records)
+            
+            # Display comprehensive report
+            analyzer.display_comprehensive_report(analyses, personal)
+            
+            # Save option
+            save = input(f"\n{analyzer.Colors.GREEN}💾 Simpan report lengkap? (y/n): {analyzer.Colors.RESET}").lower()
+            if save == 'y':
+                path = analyzer.save_full_report(
+                    f"full_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    analyses, personal
+                )
+                if path:
+                    analyzer.cprint(f"✅ Laporan tersimpan di: {path}", analyzer.Colors.GREEN)
+            
             input("\nTekan Enter untuk lanjut...")
 
 
@@ -473,8 +413,8 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print(f"\n\n{Colors.YELLOW}⚠️ Dibatalkan.{Colors.RESET}")
+        print(f"\n\n{HistoryAnalyzer.Colors.YELLOW}⚠️ Dibatalkan.{HistoryAnalyzer.Colors.RESET}")
     except Exception as e:
-        print(f"{Colors.RED}❌ Error: {e}{Colors.RESET}")
+        print(f"\n{HistoryAnalyzer.Colors.RED}❌ Error utama: {e}{HistoryAnalyzer.Colors.RESET}")
         import traceback
         traceback.print_exc()
